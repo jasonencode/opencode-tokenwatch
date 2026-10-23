@@ -1,8 +1,7 @@
 /**
- * v2 命令注册 —— 通过 keymap.layer 暴露 /usage 斜杠命令与面板命令。
+ * 命令注册 —— 通过 keymap.layer 暴露 /usage 斜杠命令与面板命令。
  *
- * 菜单用宿主通用 `dialog.select` 实现（v2 无 DialogSelect 对话栈），
- * 动作复用两代共享的 command-actions，行为与 v1 菜单一致。
+ * 菜单用宿主通用 `dialog.select` 实现，动作复用共享的 command-actions。
  */
 import type { HostAdapter, CommandSpec, SelectOption } from "../types.js"
 import { createCommandActions, rangePresets } from "../command-actions.js"
@@ -14,6 +13,7 @@ const TOGGLE_KEYS: readonly SidebarToggleKey[] = [
   "showPerformance",
   "showPricing",
   "showTokenDistribution",
+  "showContext",
   "showTrend",
 ]
 
@@ -21,10 +21,11 @@ const TOGGLE_LABELS: Record<SidebarToggleKey, () => string> = {
   showPerformance: () => t("showPerformance"),
   showPricing: () => t("showPricing"),
   showTokenDistribution: () => t("showTokenDistribution"),
+  showContext: () => t("showContext"),
   showTrend: () => t("showTrend"),
 }
 
-/** 主菜单：与 v1 showUsageMenu 的四个入口一一对应 */
+/** 主菜单：四个入口 */
 async function showUsageMenu(host: HostAdapter): Promise<void> {
   const actions = createCommandActions(host)
   setLanguage(actions.config().language)
@@ -62,7 +63,7 @@ async function showUsageMenu(host: HostAdapter): Promise<void> {
   }
 }
 
-/** 设置菜单：与 v1 showSettingsDialog 等价的开关 + 语言选择 */
+/** 设置菜单：四个展示开关 + 语言选择 */
 async function showSettingsMenu(host: HostAdapter): Promise<void> {
   const actions = createCommandActions(host)
 

@@ -1,9 +1,8 @@
 /**
- * 命令动作 —— 两代宿主共享的报告/设置逻辑。
+ * 命令动作 —— /usage 菜单共用的报告/设置逻辑。
  *
  * 只依赖 `HostAdapter`，不含任何 dialog 代码：
- * 菜单导航由各宿主实现（v1 用 DialogSelect，v2 用 dialog.select），
- * 具体动作（生成报告、改设置）在这里统一，保证两代行为一致。
+ * 菜单导航由 host/v2/commands.ts 实现，具体动作（生成报告、改设置）在这里统一。
  */
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -101,7 +100,7 @@ export function createCommandActions(host: HostAdapter): CommandActions {
   }
 }
 
-/** 报告时间范围预设，供两代宿主菜单共用 */
+/** 报告时间范围预设，供 /usage 菜单使用 */
 export interface RangePreset {
   readonly id: string
   readonly label: string

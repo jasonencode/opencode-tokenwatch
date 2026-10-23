@@ -1,25 +1,17 @@
-import type { PluginModule } from "@opencode-ai/plugin"
-
 /**
- * Server 插件入口。
+ * Server 入口 —— OpenCode 2.x 插件。
  *
- * v1 契约禁止 server 与 tui 同时出现，因此 TUI 入口在 ./tui（dist/tui.js）。
- * 这里额外携带 setup，使 opencode2 在以包主入口解析时也能找到 v2 入口：
- * - v1 加载器忽略多余字段，不受影响
- * - setup 内部用动态 import 惰性加载 TUI 装配代码，
- *   避免 server 进程在加载阶段就解析 @opentui 依赖
+ * 本插件只在 CLI 侧工作（侧边栏 + 命令），服务端不注册任何钩子。
+ * 保留一个合法的插件定义，使包主入口（.）可被宿主正常加载；
+ * TUI 实现由 package.json 的 exports["./tui"] 单独暴露。
  */
-const plugin: PluginModule & {
-  id: string
-  setup?: (ctx: any) => Promise<(() => void) | void>
-} = {
+import type { Plugin } from "@opencode/plugin"
+
+// 与 TUI 入口同理：Plugin.define 是身份函数，type-only 导入避免运行时依赖宿主 SDK。
+const plugin: Plugin.Plugin = {
   id: "opencode-tokenwatch",
-  server: async () => {
-    return {}
-  },
-  setup: async (ctx: any) => {
-    const mod = await import("./tui.js")
-    return mod.default.setup?.(ctx)
+  setup() {
+    return () => {}
   },
 }
 

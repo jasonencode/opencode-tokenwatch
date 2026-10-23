@@ -1,7 +1,7 @@
 /**
  * 报告数据装配与文件落地 —— 与宿主完全无关的内核逻辑。
  *
- * 所有函数不引用任何 opentui / opencode 类型，v1 与 v2 宿主共用同一份实现。
+ * 所有函数不引用任何 opentui / opencode 类型，报告生成与 TUI 共用同一份实现。
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -92,8 +92,8 @@ function nowStamp(): string {
 /**
  * 装配完整报告数据。
  *
- * `usage` 由宿主数据源提供（v1 走 SQL、v2 走客户端遍历），
- * 其余全部来自内核，因此两代宿主产出的报告结构完全一致。
+ * `usage` 由宿主数据源提供（客户端遍历全部会话消息），
+ * 其余全部来自内核，因此报告结构与宿主实现解耦。
  */
 export function buildCombinedData(usage: Omit<UsageReport, "filters">): CombinedReportData {
   // perfLogs: 仅用于 JSON 导出参考，保持适当窗口即可

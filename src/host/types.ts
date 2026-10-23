@@ -1,19 +1,15 @@
 /**
- * 宿主无关的能力契约。
+ * 宿主能力契约。
  *
- * v1（opencode 1.x，TuiPluginApi）与 v2（opencode2，Plugin Context）在
- * 事件模型、插槽命名、主题结构、命令注册、存储 API 上全都不同。
- * 本文件定义两者共同能力的交集，由各自的 adapter 负责映射。
- *
- * 上层 UI / 命令逻辑只依赖本接口，因此可以在两代宿主间完全复用。
+ * OpenCode 2.x 的 Plugin Context 在事件模型、插槽命名、主题结构、
+ * 命令注册与存储 API 上形态各异，由 host/v2/adapter.ts 折叠为这里的
+ * 统一接口。上层 UI / 命令逻辑只依赖本接口，不直接接触宿主 API。
  */
 import type { RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
 import type { UsageFilters, UsageReport } from "../kernel/format.js"
 
-export type HostKind = "v1" | "v2"
-
-/** 归一化主题色。v1 扁平、v2 嵌套，由 adapter 各自映射。 */
+/** 归一化主题色（v2 的嵌套 token 树由 adapter 展平）。 */
 export interface ThemeColors {
   readonly primary: RGBA
   readonly text: RGBA
@@ -25,7 +21,7 @@ export interface ThemeColors {
   readonly error: RGBA
 }
 
-/** 归一化消息事件（由两代各自的事件形状折叠而来） */
+/** 归一化消息事件（由 v2 的 step/message 事件折叠而来） */
 export interface NormalizedMessageEvent {
   readonly messageID: string
   readonly sessionID: string
@@ -63,7 +59,7 @@ export interface HostEventHandlers {
   onInvalidate(): void
 }
 
-/** 侧边栏渲染入参（归一化：两代宿主都提供 sessionID） */
+/** 侧边栏渲染入参 */
 export interface SidebarInput {
   readonly sessionID: string
 }
@@ -72,7 +68,7 @@ export interface SidebarInput {
 export interface KeyValueStore {
   get<T>(key: string, fallback: T): T
   set<T>(key: string, value: T): void
-  /** 删除条目；v1 宿主可能不提供（调用方需判空），用于会话消息 KV 的淘汰 */
+  /** 删除条目；宿主未提供时调用方需判空（用于会话消息 KV 淘汰） */
   delete?(key: string): void
 }
 
@@ -97,19 +93,17 @@ export type NotifyVariant = "info" | "success" | "warning" | "error"
 /**
  * 历史用量数据源。
  *
- * v1 通过 `opencode db` 执行 SQL（快、功能完整）；
- * v2 移除了 db 子命令，只能在客户端遍历会话消息重算（慢、需要缓存与进度提示）。
+ * OpenCode 2.x 移除了 `opencode db` 子命令，只能在客户端遍历会话消息重算
+ * （慢，需要缓存与首次扫描提示）。
  */
 export interface UsageDataSource {
-  readonly kind: "sql" | "client-scan"
   /**
-   * 首次取数是否需要显著耗时。
-   * v2 为 true —— 宿主应在调用前提示用户。
+   * 首次取数是否需要显著耗时（client-scan 恒为 true）。
+   * 宿主应在调用前提示用户。
    */
   readonly needsFirstRunNotice: boolean
   /**
    * 本次取数是否会触发冷启动全量扫描。
-   * SQL 数据源恒为 false；client-scan 在缓存为空时返回 true。
    */
   readonly isCold: () => boolean
   getUsageReport(filters: UsageFilters): Promise<UsageReport>
@@ -117,7 +111,6 @@ export interface UsageDataSource {
 
 /** 宿主能力统一抽象 */
 export interface HostAdapter {
-  readonly kind: HostKind
   /** 宿主版本号，用于诊断与报告元信息 */
   readonly hostVersion: string
 
@@ -132,7 +125,6 @@ export interface HostAdapter {
 
   /**
    * 注册命令，返回注销函数。
-   * v1 经由 host/v1/commands.tsx 用原生 DialogSelect 实现菜单，不走此方法。
    */
   registerCommands?(specs: readonly CommandSpec[]): () => void
 
@@ -150,16 +142,18 @@ export interface HostAdapter {
   sessionMessages(sessionID: string): readonly any[]
 
   /**
-   * 指定消息的 part 列表，归一化到 v1 part 形状。
+   * 指定消息的 part 列表，归一化到内核使用的 part 形状。
    *
-   * v1 需要二次查询 `api.state.part(id)`（会话无关，sessionID 忽略）；
-   * v2 传入 sessionID 时走 O(1) 的 `message.get(sessionID, id)`，
+   * 传入 sessionID 时走 O(1) 的 `message.get(sessionID, id)`，
    * 避免跨全部会话线性扫描。
    */
   messageParts(messageID: string, sessionID?: string): readonly any[]
 
   /** 宿主应用配置（读取 agent prompt 用于 system token 估算） */
   appConfig(): Record<string, unknown>
+
+  /** 模型上下文窗口上限（tokens）；宿主未提供模型信息时返回 undefined */
+  modelContextLimit?(providerID: string, modelID: string): number | undefined
 
   /** 订阅 part 级更新（用于 token 分布重算），返回取消订阅函数 */
   onPartUpdated(handler: () => void): () => void

@@ -1,8 +1,8 @@
 /**
  * 侧边栏配置 —— 宿主无关的持久化设置。
  *
- * 读写只依赖 `KeyValueStore`（v1 的 kv / v2 的 storage.store 在各自 adapter 中折叠），
- * 因此设置项在两代宿主间行为完全一致。
+ * 读写只依赖 `KeyValueStore`（v2 的 storage.store 在 adapter 中折叠），
+ * 因此设置项与宿主 API 解耦。
  */
 import type { KeyValueStore } from "../host/types.js"
 
@@ -12,6 +12,7 @@ export interface SidebarConfig {
     showPricing: boolean
     showTokenDistribution: boolean
     showTrend: boolean
+    showContext: boolean
   }
   language: "zh" | "en" | "auto"
 }
@@ -19,7 +20,7 @@ export interface SidebarConfig {
 export type SidebarToggleKey = keyof SidebarConfig["sidebar"]
 
 export const DEFAULT_CONFIG: SidebarConfig = {
-  sidebar: { showPerformance: true, showPricing: true, showTokenDistribution: true, showTrend: true },
+  sidebar: { showPerformance: true, showPricing: true, showTokenDistribution: true, showTrend: true, showContext: true },
   language: "auto",
 }
 
@@ -31,8 +32,8 @@ function cloneDefaults(): SidebarConfig {
 }
 
 /**
- * 读取配置：默认值 ← 插件配置（opencode.json）← 运行时覆盖（设置菜单）。
- * `pluginConfig` 为宿主声明式配置，v1 读 `state.config`，v2 暂无等价物。
+ * 读取配置：默认值 ← 插件声明式配置 ← 运行时覆盖（设置菜单）。
+ * `pluginConfig` 为宿主声明式配置，v2 暂无等价物（保留参数以兼容旧数据）。
  */
 export function loadConfig(store: KeyValueStore, pluginConfig?: Record<string, any>): SidebarConfig {
   const base = cloneDefaults()
@@ -56,7 +57,7 @@ export function saveConfig(store: KeyValueStore, cfg: SidebarConfig): void {
  * 递增配置版本号。
  *
  * 侧边栏用轮询版本号的方式感知"设置在别处被改了"，
- * 因为 v1 的 kv 不是响应式的。
+ * 因为插件自己的 KeyValueStore 快照不是响应式的。
  */
 export function bumpVersion(store: KeyValueStore): void {
   const v = (store.get<number>(KEY_VERSION, 0) ?? 0) + 1

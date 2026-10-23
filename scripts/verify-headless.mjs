@@ -1,17 +1,15 @@
 /**
- * 无头验证 harness：对 dist/tui.js（真实发布产物）用 mock 宿主同时驱动
- * v1.tui(api) 与 v2.setup(ctx) 两条链路。
+ * 无头验证 harness：对 dist/tui.js（真实发布产物）用 mock 宿主驱动
+ * Plugin.setup(ctx) 链路。
  *
- * 验证点（对应用户目标：v1.18 与 v2 都完全可用）：
- *  v2-1 setup() 成功且 keymap.layer 不在 setup 期调用（必须等 slot 挂载）
- *  v2-2 slot render（在有 Solid owner 的 createRoot 内）触发 layer 注册，
+ * 验证点：
+ *  v2-1 setup() 成功且 2.1.3 下 keymap.layer 在 setup 期直接注册
+ *  v2-2 slot render 不重复注册；owner 受限宿主回退到 slot 内注册，
  *       layer 形状正确：mode=global、command id/title/palette/slash/run
  *  v2-3 命令 run → dialog.select 弹出 /usage 主菜单（4 项）
- *  v2-4 选择 text → 走 v2 client-scan 数据源 → 生成 md 报告 + toast
+ *  v2-4 选择 text → 走 client-scan 数据源 → 生成 md 报告 + toast
  *  v2-5 重复挂载（多标签页）→ 再次注册 layer，无异常（宿主按 id 去重）
  *  v2-6 dispose() 可调用
- *  v1-1 tui(api) 成功，command.register 收到 /usage 命令（title=TokenWatch）
- *  v1-2 slots.register 收到 sidebar_content 渲染函数，调用返回非空 JSX
  */
 import { createRoot } from "solid-js"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -27,7 +25,8 @@ function check(name, cond, extra = "") {
 }
 
 // ───────────────────────── v2 mock ctx ─────────────────────────
-function makeV2Ctx() {
+function makeV2Ctx(options = {}) {
+  const { ownerOnlyLayer = false } = options
   const layerCalls = []
   const slotClaims = new Map()
   const selectCalls = []
@@ -77,8 +76,9 @@ function makeV2Ctx() {
       },
     },
     keymap: {
-      // 模拟宿主约束：layer 只能在宿主组件树（owner）内调用
+      // 可选地模拟早期 2.x beta 的 owner 约束：layer 只能在组件树内调用
       layer(input) {
+        if (ownerOnlyLayer && !currentOwner) throw new Error("Keymap.Provider is missing")
         layerCalls.push({ input, owner: !!currentOwner })
       },
       dispatch() {},
@@ -96,32 +96,32 @@ function makeV2Ctx() {
 
 /**
  * v2 数据源全量扫描 mock：client API 提供 cursor 分页的会话/消息列表，
- * 包含一个 v1 时期的历史会话（验证 v1 统计被纳入）、一个消息列举抛错
+ * 包含一个旧版本时期的历史会话（验证历史数据被纳入）、一个消息列举抛错
  * 的坏会话（验证按会话容错跳过）。
  */
 function makeHistoryClient() {
-  const v1Session = {
-    id: "ses_v1_old",
-    title: "v1-era session (2026-03)",
+  const legacySession = {
+    id: "ses_legacy_old",
+    title: "legacy session (2026-03)",
     time: { created: Date.parse("2026-03-15T08:00:00Z") },
   }
-  const v2Session = {
-    id: "ses_v2_new",
-    title: "v2-era session",
+  const currentSession = {
+    id: "ses_current",
+    title: "current session",
     time: { created: Date.parse("2026-09-01T08:00:00Z") },
   }
   const badSession = { id: "ses_broken", title: "broken", time: { created: Date.parse("2026-05-01T08:00:00Z") } }
 
-  const v1Assistant = (id, tokens, cost) => ({
+  const legacyAssistant = (id, tokens, cost) => ({
     id,
     type: "assistant",
-    model: { id: "muse-spark-1.2", providerID: "v1era" },
+    model: { id: "muse-spark-1.2", providerID: "legacy" },
     tokens: { input: tokens, output: tokens, reasoning: 0, cache: { read: tokens, write: 0 } },
     cost,
     time: { created: Date.parse("2026-03-15T08:05:00Z"), completed: Date.parse("2026-03-15T08:06:00Z") },
   })
 
-  const sessionPages = [[v1Session, v2Session], [badSession]]
+  const sessionPages = [[legacySession, currentSession], [badSession]]
   const messageCalls = []
   const client = {
     session: {
@@ -137,52 +137,27 @@ function makeHistoryClient() {
       list: async (input) => {
         messageCalls.push(input)
         if (input?.sessionID === "ses_broken") throw new Error("HTTP 500 decode failure")
-        if (input?.sessionID !== "ses_v1_old") return { data: [], cursor: {} }
+        if (input?.sessionID !== "ses_legacy_old") return { data: [], cursor: {} }
         if (input?.cursor) {
           // 第二页：补一条，且不再有下一页
-          return { data: [v1Assistant("msg_v1_b", 20, 0.5)], cursor: {} }
+          return { data: [legacyAssistant("msg_legacy_b", 20, 0.5)], cursor: {} }
         }
         return {
-          data: [v1Assistant("msg_v1_a", 100, 2.5)],
+          data: [legacyAssistant("msg_legacy_a", 100, 2.5)],
           cursor: { next: "cursor-msg-page2" },
         }
       },
     },
   }
-  return { client, v1Session, v2Session, messageCalls }
+  return { client, legacySession, currentSession, messageCalls }
 }
 
 // 记录当前是否处于 Solid owner 中（createRoot 内）
 let currentOwner = false
 
-// ───────────────────────── v1 mock api ─────────────────────────
-function makeV1Api() {
-  const registered = []
-  const slots = []
-  const toasts = []
-  const kv = new Map()
-  const api = {
-    event: { on: () => () => {} },
-    state: {
-      session: { messages: () => [] },
-      part: () => [],
-      config: undefined,
-    },
-    kv: {
-      get: (k) => kv.get(k),
-      set: (k, v) => kv.set(k, v),
-    },
-    slots: { register: (spec) => slots.push(spec) },
-    command: { register: (fn) => registered.push(fn) },
-    ui: { toast: (opts) => toasts.push(opts) },
-    theme: { current: { primary: {}, text: {}, textMuted: {} } },
-  }
-  return { api, registered, slots, toasts, kv }
-}
-
 // ─────────────────────────── 测试主体 ───────────────────────────
 const mod = await import(dist)
-check("dist default export { id, tui, setup }", mod.default?.id === "opencode-tokenwatch" && typeof mod.default?.tui === "function" && typeof mod.default?.setup === "function")
+check("dist default export { id, setup }", mod.default?.id === "opencode-tokenwatch" && typeof mod.default?.setup === "function")
 
 // ══ v2 链路 ══
 {
@@ -192,7 +167,7 @@ check("dist default export { id, tui, setup }", mod.default?.id === "opencode-to
 
   const dispose = mod.default.setup(ctx)
   check("v2 setup() 返回 dispose", typeof dispose === "function")
-  check("v2 setup 期不调用 keymap.layer（延迟到 slot 挂载）", layerCalls.length === 0, `layerCalls=${layerCalls.length}`)
+  check("v2 setup 期直接注册 keymap.layer（2.1.3 支持）", layerCalls.length === 1, `layerCalls=${layerCalls.length}`)
   check("v2 注册了 sidebar.content 插槽", slotClaims.has("sidebar.content"))
   check("v2 注册了 prompt.footer 命令载体插槽", slotClaims.has("prompt.footer"))
 
@@ -204,7 +179,7 @@ check("dist default export { id, tui, setup }", mod.default?.id === "opencode-to
     currentOwner = false
     d()
   })
-  check("v2 slot 挂载后 keymap.layer 被调用", layerCalls.length === 1, `layerCalls=${layerCalls.length}`)
+  check("v2 slot 挂载不再重复注册 layer", layerCalls.length === 1, `layerCalls=${layerCalls.length}`)
   const layer = layerCalls[0]?.input?.()
   check("v2 layer.mode === global", layer?.mode === "global")
   const cmd = layer?.commands?.[0]
@@ -215,14 +190,14 @@ check("dist default export { id, tui, setup }", mod.default?.id === "opencode-to
   )
   check("v2 sidebar render 返回非空 JSX", true, "headless 环境无 opentui renderer，面板渲染由真实宿主验证（用户已实测侧边栏可用）")
 
-  // 多标签页场景：再次挂载载体 → 再次注册 layer（宿主目录按 id 去重）
+  // 多标签页场景：再次挂载载体 → layer 注册保持幂等
   createRoot((d) => {
     currentOwner = true
     slotClaims.get("prompt.footer").render({})
     currentOwner = false
     d()
   })
-  check("v2 重复挂载再次注册 layer（宿主去重，无异常）", layerCalls.length === 2, `layerCalls=${layerCalls.length}`)
+  check("v2 重复挂载不重复注册 layer", layerCalls.length === 1, `layerCalls=${layerCalls.length}`)
 
   // 命令 run → /usage 主菜单 → JSON 导出（触发数据源全量扫描）
   selectAnswers.push("json")
@@ -234,23 +209,23 @@ check("dist default export { id, tui, setup }", mod.default?.id === "opencode-to
   const okToast = toasts.find((t) => typeof t.message === "string" && t.message.includes("tokenwatch-") && t.variant === "success")
   check("v2 JSON 导出成功并 toast", !!okToast, okToast?.message ?? JSON.stringify(toasts))
 
-  // v1 历史纳入断言：导出的 JSON 必须包含 v1 时期会话/模型（经 client API 全量扫描）
+  // 历史兼容断言：导出的 JSON 必须包含旧版本时期会话/模型（经 client API 全量扫描）
   if (okToast) {
     const file = okToast.message.split(": ").pop()
     try {
       const { readFileSync } = await import("node:fs")
       const report = JSON.parse(readFileSync(file, "utf-8"))
       const models = (report.models ?? []).map((m) => `${m.provider}/${m.model}`)
-      check("v2 导出包含 v1 时期模型（全量扫描生效）", models.includes("v1era/muse-spark-1.2"), JSON.stringify(models))
-      const v1Day = (report.daily ?? []).some((d) => d.day === "2026-03-15")
-      check("v2 导出 daily 包含 v1 时期日期 2026-03-15", v1Day)
-      const v1Sess = (report.sessions ?? []).some((s) => s.sessionId === "ses_v1_old")
-      check("v2 导出 sessions 包含 v1 时期会话", v1Sess)
+      check("v2 导出包含旧版本历史模型（全量扫描生效）", models.includes("legacy/muse-spark-1.2"), JSON.stringify(models))
+      const legacyDay = (report.daily ?? []).some((d) => d.day === "2026-03-15")
+      check("v2 导出 daily 包含旧版本历史日期 2026-03-15", legacyDay)
+      const legacySess = (report.sessions ?? []).some((s) => s.sessionId === "ses_legacy_old")
+      check("v2 导出 sessions 包含旧版本历史会话", legacySess)
       const totals = report.summary ?? {}
       const expectTokens = (100 + 100 + 100) + (20 + 20 + 20) // 两页消息 input+output+cacheRead
-      check("v2 v1 会话 token 合计正确（翻页取全两页）", totals.totalTokens === expectTokens, `totalTokens=${totals.totalTokens} expect=${expectTokens}`)
+      check("v2 旧版本会话 token 合计正确（翻页取全两页）", totals.totalTokens === expectTokens, `totalTokens=${totals.totalTokens} expect=${expectTokens}`)
     } catch (e) {
-      check("v2 导出 JSON 可解析且含 v1 数据", false, String(e))
+      check("v2 导出 JSON 可解析且含旧版本历史数据", false, String(e))
     }
   }
 
@@ -264,16 +239,28 @@ check("dist default export { id, tui, setup }", mod.default?.id === "opencode-to
   try { dispose() ; check("v2 dispose() 可调用", true) } catch (e) { check("v2 dispose() 可调用", false, String(e)) }
 }
 
-// ══ v1 链路 ══
+// ══ owner 受限宿主（早期 2.x beta）：setup 注册失败 → slot 挂载回退 ══
 {
-  const { api, registered, slots } = makeV1Api()
-  await mod.default.tui(api)
-  check("v1 tui(api) 注册了命令（command.register）", registered.length === 1)
-  const cmds = registered[0]?.()
-  const usage = Array.isArray(cmds) ? cmds.find((c) => (c.title ?? "").includes("TokenWatch")) : undefined
-  check("v1 命令列表包含 TokenWatch /usage", !!usage, JSON.stringify(cmds?.map?.((c) => c.title) ?? cmds))
-  check("v1 注册了 sidebar_content 插槽", slots.some((s) => s?.slots?.sidebar_content))
-  // v1 面板渲染需真实 opentui renderer，headless 下不调用（真实宿主已验证）
+  const { ctx, layerCalls, slotClaims, toasts } = makeV2Ctx({ ownerOnlyLayer: true })
+  const dispose = mod.default.setup(ctx)
+  const commandError = toasts.find((t) => String(t.message).includes("commands unavailable"))
+  check(
+    "v2 owner 受限时 setup 期静默等待 slot 挂载",
+    layerCalls.length === 0 && !commandError,
+    `layerCalls=${layerCalls.length} toast=${commandError?.message ?? "none"}`,
+  )
+  createRoot((d) => {
+    currentOwner = true
+    slotClaims.get("prompt.footer").render({})
+    currentOwner = false
+    d()
+  })
+  check(
+    "v2 owner 受限时 slot 挂载后注册成功（带 owner）",
+    layerCalls.length === 1 && layerCalls[0].owner === true,
+    `layerCalls=${layerCalls.length} owner=${layerCalls[0]?.owner}`,
+  )
+  try { dispose() } catch { /* ignore */ }
 }
 
 // ══ 汇总 ══

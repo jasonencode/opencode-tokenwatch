@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-09-20（v0.6.1）
+> 最后更新：2026-10-23（v0.7.0，仅支持 OpenCode 2.x）
 
 ---
 
@@ -9,10 +9,12 @@
 
 **opencode-tokenwatch** 是 [OpenCode CLI](https://github.com/anomalyco/opencode) 的 TUI 插件，为 AI 编程会话提供实时 Token 用量统计、缓存效率分析与性能指标监控。
 
-- **npm 包名**：`opencode-tokenwatch`
-- **版本**：`0.6.1`
+- **npm 包名**：`@jasonencode/opencode-tokenwatch`
+- **上游**：[TTWK/opencode-tokenwatch](https://github.com/TTWK/opencode-tokenwatch)（本仓库为其 fork）
+- **插件 id**：`opencode-tokenwatch`（保持不变，兼容既有命令与存储键）
+- **版本**：`0.7.0`
 - **语言**：TypeScript (ESM)，JSX via SolidJS
-- **目标运行环境**：Node.js ≥ 18，OpenCode CLI TUI 插件系统
+- **目标运行环境**：OpenCode CLI 2.x（以 2.1.3 为基线），OpenTUI ≥ 0.6.6
 - **构建工具**：`tsc`（类型声明生成）+ `esbuild`（JS 打包，含 SolidJS JSX 预编译）
 - **协议**：MIT
 
@@ -23,10 +25,11 @@
 ```
 opencode-tokenwatch/
 ├── src/                        # 所有源码
-│   ├── tui.tsx                 # TUI 分发入口：默认导出 { id, tui, setup }（见下方说明）
-│   ├── server.ts               # Server 插件入口（空壳 server + 惰性动态 import 的 setup）
+│   ├── tui.tsx                 # CLI 插件入口：默认导出 { id, setup(ctx) }（Plugin.Definition）
+│   ├── server.ts               # Server 插件入口（合法空插件；TUI 逻辑不进入服务端）
 │   ├── kernel/                 # ★ 共享内核：零宿主依赖（无 opentui / 无 opencode 类型）
 │   │   ├── model.ts            #   归一化 TokenMessage + 命中率/有效性判定
+│   │   ├── context.ts          #   当前上下文窗口占用（官方 5 分量 / 模型 limit）
 │   │   ├── format.ts           #   数据格式化 & 全部 TypeScript 类型定义
 │   │   ├── i18n.ts             #   国际化（中文/英文/自动检测）
 │   │   ├── perf.ts             #   性能追踪（TTFT/TPS/延迟）+ JSONL 日志
@@ -35,15 +38,12 @@ opencode-tokenwatch/
 │   │   ├── report-html.ts      #   HTML 报告生成（ECharts 内嵌）
 │   │   └── config.ts           #   侧边栏配置读写（宿主无关）
 │   ├── host/                   # ★ 宿主适配层
-│   │   ├── types.ts            #   HostAdapter 统一契约（两代能力的交集）
-│   │   ├── runtime.tsx         #   共享启动器：事件 → perf/聚合/KV → 侧边栏
-│   │   ├── command-actions.ts  #   两代共用的报告/设置动作
-│   │   ├── v1/adapter.ts       #   TuiPluginApi → HostAdapter
-│   │   ├── v1/data-source.ts   #   SQL 数据源（opencode db）
-│   │   ├── v1/commands.tsx     #   v1 /usage 菜单（原生 DialogSelect）
-│   │   ├── v2/adapter.ts       #   v2 Plugin Context → HostAdapter
-│   │   ├── v2/data-source.ts   #   服务端 API 全量扫描（cursor 翻页，覆盖 v1 历史；带缓存 + 冷启动标记 + 客户端回退）
-│   │   └── v2/commands.ts      #   v2 /usage 菜单（keymap.layer + dialog.select）
+│   │   ├── types.ts            #   HostAdapter 统一契约
+│   │   ├── runtime.tsx         #   启动器：事件 → perf/聚合/KV → 侧边栏
+│   │   ├── command-actions.ts  #   报告/设置动作（与菜单实现解耦）
+│   │   ├── v2/adapter.ts       #   Plugin Context → HostAdapter
+│   │   ├── v2/data-source.ts   #   服务端 API 全量扫描（cursor 翻页；缓存 + 冷启动标记）
+│   │   └── v2/commands.ts      #   /usage 菜单（keymap.layer + dialog.select）
 │   └── ui/sidebar.tsx          # TokenWatchPanel 组件（仅依赖 HostAdapter）
 ├── dist/                       # 编译输出（发布到 npm）
 ├── docs/
@@ -60,58 +60,66 @@ opencode-tokenwatch/
 
 ---
 
-## 双版本兼容架构（v0.6.0 起）
+## OpenCode 2.x 架构（v0.7.0 起）
 
-一个 npm 包同时服务两代宿主，靠的是"共享内核 + 双宿主适配 + 单一包体分发"：
+只支持 OpenCode 2.x，单包通过两个入口分别服务服务端与 CLI：
 
 ```
-                 opencode 1.x                    opencode 2 (beta)
-                      │                                 │
-           loader: 读 default.tui()           loader: 读 default.setup(ctx)
-                      └────────────┬────────────────────┘
-                                   ▼
-                    src/tui.tsx  { id, tui, setup }
-                                   │
-                  ┌────────────────┴────────────────┐
-                  ▼                                 ▼
-        createV1Adapter(api)              createV2Adapter(ctx)
-        TuiPluginApi → HostAdapter        Plugin Context → HostAdapter
-                  └────────────────┬────────────────┘
-                                   ▼
-                      src/host/runtime.tsx（共享启动器）
-                                   │
-                    ┌──────────────┼──────────────┐
-                    ▼              ▼              ▼
-             src/ui/sidebar   kernel/perf    kernel/store
-                    │
-               src/kernel/*（零宿主依赖）
+                   OpenCode 2.x host
+                          │
+        ┌─────────────────┴─────────────────┐
+        ▼                                   ▼
+  package "." → dist/server.js       package "./tui" → dist/tui.js
+  { id, setup }（Plugin.Plugin）      { id, setup(ctx) }（Plugin.Definition）
+        │                                   │
+        │                           createV2Adapter(ctx)
+        │                           Plugin Context → HostAdapter
+        │                                   ▼
+        │                        src/host/runtime.tsx
+        │                                   │
+        │                    ┌──────────────┼──────────────┐
+        │                    ▼              ▼              ▼
+        │             src/ui/sidebar   kernel/perf    kernel/store
+        │                    │
+        │             src/kernel/*（零宿主依赖）
+        └─ 服务端仅保留合法空插件，不加载任何 TUI 代码
 ```
 
-**宿主调用哪个入口，就是 100% 可靠的代际判断**——不需要任何版本探测或启发式。
+| 维度 | OpenCode 2.x 实现 |
+|---|---|
+| 模块契约 | 默认导出 `{ id, setup(ctx) }`（`Plugin.Definition` / `Plugin.Plugin`），`id = "opencode-tokenwatch"` |
+| 插槽 | `ui.slot({ append: "sidebar.content", render })`，入参 `{ sessionID }` |
+| 实时事件 | `session.step.ended`（tokens/cost）、`session.step.started`、`session.text/reasoning.delta`、`session.tool.progress`、`session.idle` |
+| 命令 | `keymap.layer`（`{ id, title, slash, run }`）+ `dialog.select` |
+| 存储 | `storage.store()` + 异步 `mutate`（Store 同步可读） |
+| 主题 | 嵌套 token 树（2.1.3：`text.base` / `text.muted` / `text.action.primary.base`；适配层兼容旧名 `default`/`subdued`） |
+| 消息 part | assistant 消息内直接内嵌 `content` |
+| 性能口径 | step/reasoning/text 事件锚点 + assistant `time.streamed`（TPS 对齐官方 tok/s） |
+| 历史用量 | 无 `opencode db` → `client.session.list`/`message.list` cursor 翻页全量扫描（含更早版本历史；首次提示用户） |
 
-| 差异维度 | v1（1.18+） | v2（beta） |
-|---|---|---|
-| 模块契约 | `default.tui(api)` | `default.setup(ctx)`，需 `id` + `setup` |
-| 插槽 | `api.slots.register({ sidebar_content })` | `ui.slot({ append: "sidebar.content", render })`，入参 `{ sessionID }` |
-| 事件 | `message.updated` / `message.part.updated` | `session.step.ended` / `session.text.started` / `session.message.content.updated` |
-| 命令 | `api.command.register` + `DialogSelect` | `keymap.layer`（`{ id, title, slash, run }`）+ `dialog.select` |
-| 存储 | `api.kv.get/set`（同步） | `storage.store()` + 异步 `mutate`（惰性初始化） |
-| 主题 | 扁平 `{ primary, textMuted }` | 嵌套 `{ text.default, text.subdued, text.action.primary.default }` |
-| 消息 part | 需二次查询 `api.state.part(id)` | 消息内直接内嵌 `content` |
-| 性能口径 | part.time.start / message.time.completed | step/reasoning/text 事件锚点 + time.streamed（TPS 对齐官方 tok/s） |
-| 历史用量 | `opencode db` SQL | 无 db 子命令 → `client.session.list`/`message.list` cursor 翻页全量扫描（覆盖 v1 历史；首次提示用户） |
+**2.1.3 事件集合注意**：实时事件流（`OpenCodeEvent`）**不包含**
+`session.message.content.updated`（该事件只走 durable 回放）。因此不能用它做
+流式刷新信号；改为订阅 `session.text.delta` / `session.reasoning.delta` /
+`session.tool.progress`（UI 侧已按 ~2Hz 节流）。
 
-**约束**：v1 加载器禁止 `server` 与 `tui` 同时出现（允许 `setup` 等其他字段），
-因此 `dist/tui.js` 携带 `{ id, tui, setup }`，`dist/server.js` 携带 `{ id, server, setup }`
-（后者的 setup 用动态 import 惰性加载，避免 server 进程解析 @opentui）。
+**keymap.layer 的 owner 约束**：2.1.3 文档允许在 `setup` 内（含 `await` 之后）
+注册 keymap layer，`v2/adapter.ts` 因此先直接注册。部分早期 2.x beta 的
+`Keymap.createLayer` 内部会 `useValue()` 读 Keymap Provider 并 `createEffect`，
+要求 Solid owner；此时注册抛 "Keymap.Provider is missing"，适配层捕获后
+退回 `prompt.footer` 载体插槽，在组件树内、带 owner 时再注册。两条路径均通过
+无头回归（直接注册 / owner 受限回退）验证。
 
-**v2 keymap.layer 的 owner 约束（重要）**：宿主的 `Keymap.createLayer` 内部先
-`useValue()` 读 Keymap Provider 上下文，再经 `useBindings` 调 `createEffect`——
-两者都要求调用方处于宿主组件树内且拥有 Solid owner。而插件 `setup()` 在无 owner
-的 Promise 链中执行，**直接调用必抛 "Keymap.Provider is missing"**。因此
-`v2/adapter.ts` 把注册动作存为 `mountKeymapLayer`，由 `prompt.footer` 载体插槽在
-挂载时执行（主屏和会话输入框都会挂载该插槽，且不受侧边栏折叠影响；多会话标签页
-重复注册由宿主命令目录按 id 去重，无害）。`sidebar.content` 插槽只负责渲染面板。
+**安装/缓存行为**：OpenCode 2.1.3 对 `"plugins": ["包名"]` 优先使用自身
+全局缓存（`~/.cache/opencode/npm/<name>@latest/`），不一定读取项目
+`node_modules`。升级后若仍加载旧版，会出现 OpenTUI 双运行时的
+`OPENTUI_FORCE_UNICODE` 冲突；用 `opencode plugin add/update` 刷新缓存，或本地
+开发时在配置里写绝对路径。真实 E2E 用临时项目 + 绝对路径验证打包产物。
+
+**依赖兼容性**：`@opentui/*` 与 `solid-js` 声明为可选 peerDependencies，
+运行时由宿主提供；本地仅作为 devDependencies 参与构建。`@opencode/plugin` 只作
+devDependency + 可选 peer，入口用 type-only 导入，避免它的非可选 `solid-js`/
+`@opentui/*` peers 被安装。v0.6.1 曾把 OpenTUI 放进 `dependencies`，导致与
+OpenCode 2.1.3 自带的 OpenTUI 0.6.6 形成第二份运行时，是插件在 2.1.3 上失效的根因之一。
 
 ---
 
@@ -137,8 +145,7 @@ kernel/perf.ts      → JSONL 日志（~/.opencode/tokenwatch.jsonl，5MB rename
                                     1s 合并落盘 + 原子写；首次读取时从 JSONL 全量迁移）
                     → SessionPerfStats（内存中，session 切换时异步重放 JSONL 恢复）
 
-/usage 命令         → host/v1/data-source.ts（opencode db SQL）或
-                      host/v2/data-source.ts（client API cursor 翻页全量扫描，
+/usage 命令         → host/v2/data-source.ts（client API cursor 翻页全量扫描，
                                             脏标记 + stale-while-revalidate 缓存）
                     → kernel/report.ts（装配 + 落盘）→ HTML / JSON / Markdown
                     → kernel/report-html.ts（内嵌 ECharts 的独立 HTML，自动打开）
@@ -152,13 +159,13 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 
 | 指标 | 本插件公式 | 官方参照出处 | 结论 |
 |---|---|---|---|
-| tokenTotal | input+output+reasoning+cacheRead+cacheWrite（5分量） | v1 `packages/app/src/components/session/session-context-metrics.ts` tokenTotal；v2 `context/data.js` lastAssistantWithUsage | ✓ 一致 |
+| tokenTotal | input+output+reasoning+cacheRead+cacheWrite（5分量） | `packages/app/src/components/session/session-context-metrics.ts` tokenTotal；`context/data.js` lastAssistantWithUsage | ✓ 一致 |
+| 上下文占用 | 最后一条有效 assistant 的 5 分量 / 模型 `limit.context` | `session-context-metrics.ts` `getSessionContext` | ✓ 与官方 usage% 一致 |
 | 失败过滤 | 五分量合计 = 0 跳过（含 reasoning） | 同上（tokenTotal <= 0 continue） | ✓ |
-| cacheHitRate | cacheRead / (cacheRead + input) | v2 `core/session/usage.ts`：input = nonCachedInputTokens | ✓ 分母即全部输入 |
-| TPS (v2) | output / (time.streamed − 流式窗口起点) | v2 `tui/routes/session/rows.ts` turnTokensPerSecond | ✓（每消息=每 step；窗口起点来自 step.started 事件） |
-| TTFT (v2) | 首个 reasoning/text **delta** 事件 − step 起点 | part.started 是占位符打开（≈step 起点+0~20ms），delta 才是首 token | ✓ |
-| TPS/TTFT (v1) | part.time.start 首锚 / completed 终点 | v1 无官方 tok/s 展示；part.start 即首 token | ✓ |
-| daily 分桶 | 两代均按**本地时区**日期 | v1 SQL date(...,'localtime') | ✓（v2 曾用 UTC 已修） |
+| cacheHitRate | cacheRead / (cacheRead + input) | `core/session/usage.ts`：input = nonCachedInputTokens | ✓ 分母即全部输入 |
+| TPS | output / (time.streamed − 流式窗口起点) | `tui/routes/session/rows.ts` turnTokensPerSecond | ✓（每消息=每 step；窗口起点来自 step.started 事件） |
+| TTFT | 首个 reasoning/text **delta** 事件 − step 起点 | part.started 是占位符打开（≈step 起点+0~20ms），delta 才是首 token | ✓ |
+| daily 分桶 | 按**本地时区**日期 | 早期 SQL 的 date(...,'localtime') | ✓（曾用 UTC 已修） |
 | token 分布 | chars/4 估算（json/code/CJK 修正），output 用真实 tokens | 官方无角色分布；同类插件同为 chars/4 系估算 | ✓ 估算性质（UI 已标注） |
 | cost/1K | cost / (i+o+cr+cw) × 1000（混合费率） | 官方 cost 按分段每百万计价 | ✓ 口径成立 |
 | Welford/分位数 | kernel/perf-aggregate.ts 单一实现 | — | 三处（perf/store/report）共用 |
@@ -170,8 +177,10 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 
 ### `src/tui.tsx` — 插件入口
 
-- 实现 `TuiPluginModule.tui` 接口
-- 维护 `allTokenMessages: Signal<TokenMessage[]>`（当前 session 全量消息）
+- 默认导出 `{ id: "opencode-tokenwatch", setup(ctx) }`（类型 `Plugin.Definition`；`Plugin.define` 只是身份函数，type-only 导入避免运行时依赖宿主 SDK）
+- `setup` 只做装配：`createV2Adapter(ctx)` → `startTokenWatch(host)` → `registerV2Commands(host)`，
+  返回统一 dispose；装配异常用 `ctx.ui.toast.show` 暴露首行原因
+- `src/host/runtime.tsx` 维护 `allTokenMessages: Signal<TokenMessage[]>`（当前 session 全量消息）
 - **无效数据过滤**：`rebuildFromMessages` 加五分量合计 > 0 检查，与事件处理器保持一致
 - **session 切换时**：从 KV Store 恢复历史消息，若无则轮询 `sessionMessages()` 重建
 - **数据持久化**：消息更新经 500ms 尾沿节流写入 KV（key = `tokenwatch-msgs-{sessionID}`），
@@ -186,17 +195,17 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 - **tokenDistribution**：从消息 parts 估算 Token 分布（chars/4 经验公式）
   - 5 桶：system / user / toolCall / toolResult / output + other 兜底桶，超出真实 input 时比例收缩
 - **缓存命中率公式**：`cacheRead / (cacheRead + input)`
+- **上下文窗口**：`contextStats` 取当前会话最后一条有效 assistant 消息，`used = 5 分量 / 模型 limit.context`；单行显示已用/上限、百分比与进度条（与缓存行同构），70%/90% 变色；`showContext` 控制
 - **趋势计算**：最近3次 vs 前3次的命中率差值，需至少6条消息
 - **成本展示**：`showPricing` 开启且 `totalCost > 0` 时显示（免费模型不显示，属正常行为）
 
 ### `src/kernel/perf.ts` — 性能追踪
 
 - **无效数据过滤**：`handleMessageUpdated` 跳过全零 token 请求，不写 JSONL / stats
-- **TTFT**：取最早**可见输出锚点**（`Math.min`）——v1 为 text/reasoning/tool part 的
-  `time.start`，v2 为首个 `*-delta` 事件；step / part-open / step-start / step-finish
-  等"窗口锚点"只参与 TPS 窗口，不参与 TTFT
+- **TTFT**：取最早**可见输出锚点**（`Math.min`）——首个 `*-delta` 事件；
+  step / part-open 等"窗口锚点"只参与 TPS 窗口，不参与 TTFT
 - **TPS**：`outputTokens / genMs * 1000`；genMs = 流式终点 − 最早**任意** part 起点。
-  v2 的流式终点优先 `time.streamed`（provider 响应体接收完），起点为
+  流式终点优先 assistant `time.streamed`（provider 响应体接收完），起点为
   `session.step.started` —— 与宿主官方 tok/s 口径 `output/(streamed−created)` 一致；
   推理模型的 reasoning 阶段计入分母（此前只锚 text.started 导致 TPS 虚高数倍）；
   无可靠 genMs 时为 null（不使用含排队时间的 fallback）
@@ -220,23 +229,14 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 - **一次性迁移**：首次 `readPersistedStats()` 自动读取全量 JSONL（含 `.1`）重建历史
 - **防重复计数**：迁移时先清空 models 再重建，以 JSONL 为唯一权威来源
 
-### `src/host/v1/data-source.ts` — SQL 数据源
-
-- 通过 `opencode db <SQL> --format json` CLI 子进程查询 SQLite
-- **过滤条件**：`role = 'assistant' AND tokens.total > 0`（过滤失败/空请求）
-- **totalTokens 字段**：直接取 `$.tokens.total`（OpenCode CLI 写入的字段）
-- **注入防护**：`escapeSql()` 除单引号翻倍外，还剔除 `"`/`%`/换行等 shell
-  元字符闭合命令行注入面；日期参数经正则校验；stderr 仅在无 stdout 时判失败
-- **daily 上限**：默认 365 天，截断时 `dailyTruncated=true`（报告时间线区提示）
-
 ### `src/host/v2/data-source.ts` — 客户端扫描数据源
 
 - client API cursor 翻页全量扫描（会话 ≤64 页×500，单会话消息 ≤400 页×200），
-  覆盖 v1 时期历史；截断/跳过经宿主 toast 警告
+  覆盖更早版本留下的历史；截断/跳过经宿主 toast 警告
 - **缓存**：同一 TUI 进程复用；`session.idle` 置脏，取数走
   stale-while-revalidate（旧快照立即返回 + 后台重建）
 - session 级 model/provider 过滤用会话"首个非 unknown"主模型，
-  与 v1 的逐消息过滤语义近似但不完全等价
+  多模型会话无法按单个模型精确切分（已知近似）
 
 ### `src/kernel/report-html.ts` — HTML 报告
 
@@ -256,8 +256,12 @@ interface TokenMessage {          // TUI 内存模型（单条 assistant 消息�
   inputTokens, outputTokens, reasoningTokens, cacheRead, cacheWrite, cost
 }
 
-interface SessionTokenData {      // SQL 查询聚合结果
+interface SessionTokenData {      // 用量聚合结果
   totalTokens, inputTokens, outputTokens, reasoningTokens, cacheRead, cacheWrite, totalCost
+}
+
+interface ContextUsage {          // 当前上下文窗口占用（kernel/context.ts）
+  providerID, modelID, used, limit, percent
 }
 
 interface ModelPerfStats {        // 性能统计（内存 / stats-store / JSONL）
@@ -305,7 +309,8 @@ const tokenTotal = (msg) =>
 
 > 下表为历史记录，"位置"列是 v0.6.0 重构前的文件路径（perf-tracker.ts →
 > kernel/perf.ts、stats-store.ts → kernel/store.ts、queries.ts →
-> host/v1/data-source.ts、generate-usage-html.ts → kernel/report-html.ts）。
+> host/v2/data-source.ts、generate-usage-html.ts → kernel/report-html.ts）。
+> v1 专用条目仅作历史留存；v0.7.0 起已移除 v1 支持。
 
 | 优先级 | 位置 | 问题描述 | 修复状态 |
 |---|---|---|---|
@@ -337,7 +342,7 @@ const tokenTotal = (msg) =>
 - **编译流程**：`npm run build`（= `tsc && node build.tui.mjs`）
   - `tsc`：仅生成 `.d.ts` 类型声明文件（`emitDeclarationOnly: true`）
   - `build.tui.mjs`：esbuild 打包，将 `src/tui.tsx` -> `dist/tui.js`（含 SolidJS JSX 预编译），`src/server.ts` -> `dist/server.js`
-- **JSX 预编译**：使用 `esbuild-plugin-solid`，配置 `moduleName: "@opentui/solid"` + `generate: "universal"`，将 JSX 编译为 `createComponent()` 等调用。opencode 1.17.14+ 不再进行运行时 JSX 转换，要求插件在构建时预编译
+- **JSX 预编译**：使用 `esbuild-plugin-solid`，配置 `moduleName: "@opentui/solid"` + `generate: "universal"`，将 JSX 编译为 `createComponent()` 等调用。OpenCode 2.x 不再做运行时 JSX 转换，插件必须在构建时预编译
 - **产物在 `dist/`，不提交到 git**
 - **JSX**：SolidJS 风格，不是 React。`createSignal`/`createMemo`/`createEffect` 等
 - **类型安全**：大量使用 `any` 访问 OpenCode API 事件（API 类型不完整），修改时需谨慎
@@ -347,29 +352,25 @@ const tokenTotal = (msg) =>
 ```json
 {
   ".":       { "import": "./dist/server.js" },        // Server 插件入口
-  "./tui":   { "import": "./dist/tui.js", "config": { "enabled": true } },  // TUI 插件入口
+  "./tui":   { "import": "./dist/tui.js" },           // CLI (TUI) 插件入口
   "./server":{ "import": "./dist/server.js" }         // Server 插件（显式路径）
 }
 ```
 
-- `./tui` 导出必须包含 `"config": { "enabled": true }`，opencode 1.17.14+ 据此启用 TUI 插件
+- OpenCode 2.x 通过 `./tui` 导出自动加载 CLI 插件，无需旧版的 `config.enabled` 元数据
 - `./tui` 导出的文件必须是预编译的 `.js`（非 `.jsx`）
+- `@opencode/plugin`、`@opentui/*`、`solid-js` 在 esbuild 中保持 external，运行时由宿主解析
 
-### OpenCode 插件 API
+### OpenCode 2.x 插件 API（实际使用）
 
-- `api.event.on(eventName, handler)` — 订阅事件
-- `api.state.session.messages(sessionId)` — 获取消息列表
-- `api.state.part(messageId)` — 获取消息 parts
-- `api.kv.get/set(key, value)` — KV 持久化存储
-- `api.ui.toast()` — 显示通知
-- `api.command.register()` — 注册命令（slash command）
-
-### SQL 查询
-
-- 通过 `child_process.exec` 运行 `opencode db "<SQL>" --format json`
-- 超时：30秒。失败时 reject，调用方需 catch
-- 所有字符串过滤参数必须经过 `escapeSql()`（单引号转义）
-- 数字型参数（limit、dates）通过 TypeScript 类型保证，但仍需 `Math.max(1, ...)` 边界检查，日期参数已引入正则校验
+- `ctx.data.on(eventName, handler)` — 订阅实时事件（`session.step.*` / `session.*.delta` / `session.idle`）
+- `ctx.data.session.list/get`、`ctx.data.session.message.list/get` — 读取会话与消息
+- `ctx.storage.store(key, { initial })` — 持久化存储（`Store` 同步读 + 异步 `mutate`）
+- `ctx.ui.toast.show()` — 显示通知
+- `ctx.ui.slot({ append, render })` — 注册插槽
+- `ctx.keymap.layer(factory)` — 注册命令（2.1.3 可在 `setup` 内直接调用；早期 beta 无 owner 时会抛错，适配层回退到 `prompt.footer` 插槽内注册）
+- `ctx.ui.dialog.select/alert` — 交互对话框
+- `ctx.client.*` — 服务端 API（历史用量全量扫描）
 
 ### 日志与统计文件
 
@@ -381,7 +382,7 @@ const tokenTotal = (msg) =>
 ### i18n
 
 - 支持语言：`zh`（中文）、`en`（英文）、`auto`（系统自动检测）
-- 翻译表在 `src/i18n.ts`，`t(key)` 函数用于取值
+- 翻译表在 `src/kernel/i18n.ts`，`t(key)` 函数用于取值
 
 ---
 
@@ -397,13 +398,16 @@ npm run build
 # 发布前检查
 npm run release:check
 
-# 无头回归：对 dist/tui.js 用 mock 宿主同时驱动 v1.tui() 与 v2.setup()
+# 无头回归：对 dist/tui.js 用 mock 宿主驱动 Plugin.setup(ctx)
 node scripts/verify-headless.mjs
 
+# TPS/TTFT 口径回归（模拟 OpenCode 2.x 事件序列）
+node scripts/verify-tps.mjs
+
 # 无头 E2E（需 cd scripts/e2e && npm i）：伪终端驱动真实 TUI，
-# 注入 /usage 并断言补全列表与四项菜单（锁屏/无显示器也可用）
-node scripts/e2e/opencode2-e2e.js   # opencode2 (beta)
-node scripts/e2e/opencode-v1-e2e.js # opencode (v1.18)
+# 自动创建临时项目并把 plugins 指向本仓库，注入 /usage 并断言补全列表与四项菜单
+# （锁屏/无显示器也可用）
+node scripts/e2e/opencode2-e2e.js   # OpenCode 2.x
 
 # 在 OpenCode 中加载插件（需先 build）
 # ~/.opencode/config.json 中配置 plugins
@@ -415,18 +419,42 @@ node scripts/e2e/opencode-v1-e2e.js # opencode (v1.18)
 
 | 依赖 | 用途 |
 |---|---|
-| `@opencode-ai/plugin` | OpenCode 插件 API 类型定义 |
-| `@opentui/core` | TUI 颜色类型（RGBA） |
+| `@opencode/plugin` | OpenCode 2.x 插件 API 类型（仅 type-only 导入） |
+| `@opentui/core` | TUI 颜色类型（RGBA）/ 渲染类型 |
 | `@opentui/solid` | SolidJS TUI 渲染器 |
 | `solid-js` | 响应式 UI 框架（通过 @opentui/solid） |
-| `esbuild` | JS 打包器，将 TSX 预编译为纯 JS（v0.5.0 新增） |
-| `esbuild-plugin-solid` | esbuild 插件，SolidJS JSX -> createComponent 转换（v0.5.0 新增） |
+| `esbuild` | JS 打包器，将 TSX 预编译为纯 JS |
+| `esbuild-plugin-solid` | esbuild 插件，SolidJS JSX -> createComponent 转换 |
 
-> 以上均为 devDependencies，运行时由 OpenCode CLI 宿主环境提供。
+> `@opencode/plugin` 仅作 devDependency + 可选 peer（类型解析用）：`Plugin.define` 是身份函数，
+> 入口用 type-only 导入并直接导出同形状对象，避免把宿主 SDK 及其非可选
+> `solid-js`/`@opentui/*` peer 带进插件目录（第二份运行时的来源）。`@opentui/*` 与
+> `solid-js` 为可选 peerDependencies + devDependencies，运行时由 OpenCode 宿主提供。
+> `@opentui/solid@0.6.6` 要求 `solid-js@1.9.12`（本地开发固定该版本）。
 
 ---
 
 ## 版本历史
+
+### v0.7.0（2026-10-23）
+
+- **fork 发布**：npm 包名改为 `@jasonencode/opencode-tokenwatch`；插件 id 保持 `opencode-tokenwatch`
+- **仅支持 OpenCode 2.x**：移除 v1（1.18）适配层、SQL 数据源与 `tui(api)` 入口
+- **新增上下文窗口占用**：侧边栏显示当前会话最后一条有效 assistant 消息的 5 分量 / 模型 `limit.context`，带百分比与进度条；`showContext` 默认开启
+- **入口改为 2.x 契约**：默认导出 `{ id, setup(ctx) }`（与 `Plugin.define` 同形状，类型为
+  `Plugin.Definition` / `Plugin.Plugin`）；`@opencode/plugin` 仅 type-only 导入，避免运行时
+  依赖把宿主 SDK 及其 `solid-js`/`@opentui/*` peers 带进插件目录
+- **修复 2.1.3 兼容性**：
+  - `@opentui/*` / `solid-js` 从 dependencies 移到可选 peerDependencies（宿主提供），
+    避免第二份 OpenTUI 运行时；本地固定 `@opentui 0.6.6` + `solid-js 1.9.12` 构建
+  - 主题 token 跟进 2.1.3 重命名（`text.default → text.base`、`text.subdued → text.muted`），
+    旧名保留回退
+  - 实时事件适配：2.1.3 的 `OpenCodeEvent` 不含 `session.message.content.updated`，
+    part 刷新改用 `session.text/reasoning.delta` + `session.tool.progress`
+  - assistant 消息 union 收窄（`message.type === "assistant"`）后读取 `model` / `time.streamed`；
+    并用 `step.started` 缓存 model/起点作为兜底
+- **服务端入口**：`dist/server.js` 只导出合法空插件，不再动态加载 TUI（服务端不解析 @opentui）
+- 构建 externals 改为 `@opencode/*`；无头回归与 TPS 回归全部通过
 
 ### v0.6.0（2026-09-06，未发布）
 
@@ -441,4 +469,4 @@ node scripts/e2e/opencode-v1-e2e.js # opencode (v1.18)
 - **内部**：新增 kernel/perf-aggregate.ts 统一三处 Welford/分位数聚合；删除死代码；净 -416 行
 - 兼容性：kv 配置键与 tokenwatch-stats.json 格式向后兼容；v1 行为不变
 
-*本文档于 2026-09-06 更新，版本 v0.6.0。*
+*本文档于 2026-10-23 更新，版本 v0.7.0（仅支持 OpenCode 2.x）。*

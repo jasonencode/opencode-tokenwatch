@@ -1,7 +1,7 @@
 /**
- * v2 历史用量数据源 —— 客户端遍历重算。
+ * 历史用量数据源 —— 客户端遍历重算。
  *
- * v2 移除了 `opencode db` 子命令，无法再用 SQL 聚合。这里改为：
+ * OpenCode 2.x 移除了 `opencode db` 子命令，无法再用 SQL 聚合。这里改为：
  * 1. `session.list()` 拿到全部会话（自带 tokens/cost，可快速出总数）
  * 2. 逐会话 `message.list()` 遍历 assistant 消息，按模型 / 供应商 / 日期分解
  *
@@ -55,7 +55,7 @@ let inflight: Promise<Snapshot> | null = null
 let dirty = false
 
 function dayOf(ts: number): string {
-  // 本地时区日期（YYYY-MM-DD），与 v1 SQL 的 date(...,'localtime') 分桶口径一致；
+  // 本地时区日期（YYYY-MM-DD），与旧版 SQL 的 date(...,'localtime') 分桶口径一致；
   // 用 toISOString 会按 UTC 分桶，UTC+8 的晚间使用会被记到"次日"
   const d = new Date(ts)
   const y = d.getFullYear()
@@ -87,10 +87,10 @@ const MAX_SESSION_PAGES = 64
 const MAX_MESSAGE_PAGES = 400
 
 /**
- * 服务端全量会话列表（含 v1 时期历史）。
+ * 服务端全量会话列表（含更早版本留下的历史会话）。
  *
  * 必须走 `client.session.list`：TUI 的 `data.session.list()` 只是客户端 store，
- * 仅包含本进程打开/同步过的会话 —— v1 历史会话从未被打开过，走它会完全漏掉。
+ * 仅包含本进程打开/同步过的会话 —— 未打开过的历史会话，走它会完全漏掉。
  * 服务端按页返回（limit=500 仍有 cursor.next），需 cursor 翻页拉全。
  * 返回 truncated=true 表示达到页上限仍有更多数据（已截断）。
  */
@@ -115,7 +115,7 @@ async function listAllSessions(ctx: any): Promise<{ sessions: any[]; truncated: 
 
 /**
  * 单会话全量消息（cursor 翻页）。服务端每页默认 50 条、只回最近一页，
- * 长会话的历史消息必须翻页才能拿全。个别 v1 早期会话服务端解码失败
+ * 长会话的历史消息必须翻页才能拿全。个别早期会话服务端解码失败
  * （HTTP 500），调用方需按会话容错跳过。
  */
 async function listAllMessages(ctx: any, sessionID: string): Promise<{ messages: any[]; truncated: boolean }> {
@@ -167,7 +167,7 @@ async function scan(ctx: any): Promise<Snapshot> {
 
     let messages: any[]
     try {
-      // 服务端全量消息；个别 v1 早期会话解码失败（500），跳过不计入
+      // 服务端全量消息；个别早期会话解码失败（500），跳过不计入
       const result = await listAllMessages(ctx, sessionID)
       messages = result.messages
       if (result.truncated) truncatedMessageSessions++
@@ -193,7 +193,7 @@ async function scan(ctx: any): Promise<Snapshot> {
       const model = message?.model?.id ?? "unknown"
       const day = dayOf(message?.time?.created ?? session?.time?.created ?? Date.now())
 
-      // v2 用 finish === "error" 判定失败，比 v1 的 tokens.total === 0 启发式更准确
+      // 用 finish === "error" 判定失败，比 tokens.total === 0 启发式更准确
       const isFailure = message?.finish === "error" || total === 0
       const modelKey = `${provider}/${model}`
       const err = errorByModel.get(modelKey) ?? { provider, model, failed: 0, total: 0 }
@@ -206,7 +206,7 @@ async function scan(ctx: any): Promise<Snapshot> {
       }
       errorByModel.set(modelKey, err)
 
-      // 失败请求不计入用量统计（与 v1 SQL 过滤条件一致）
+      // 失败请求不计入用量统计（与宿主 tokenTotal 口径一致）
       if (isFailure) continue
       sawAssistant = true
 
@@ -343,7 +343,7 @@ async function scan(ctx: any): Promise<Snapshot> {
     errors: {
       successCount,
       failedCount,
-      // 小数口径（0~1），与 v1 的 getErrorStats 及 HTML 报告的消费方一致
+      // 小数口径（0~1），与内核的 getErrorStats 及 HTML 报告消费方一致
       errorRate: successCount + failedCount > 0 ? failedCount / (successCount + failedCount) : 0,
       byModel: Array.from(errorByModel.values()),
     },
@@ -406,7 +406,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
     (s) => matchesDay(s.day, filters) && matchesModel(s.provider, s.model, filters),
   )
   // 注意：session 级 model/provider 过滤用的是该会话"首个非 unknown"的主模型，
-  // 多模型会话无法按单个模型精确切分 —— 与 v1 SQL 的逐消息过滤语义近似但不完全等价
+  // 多模型会话无法按单个模型精确切分 —— 属已知近似
   const models = snapshot.models.filter((m) => matchesModel(m.provider, m.model, filters))
   const providers = snapshot.providers.filter((p) => !filters.provider || p.provider === filters.provider)
   const daily = snapshot.daily.filter((d) => matchesDay(d.day, filters))

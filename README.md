@@ -6,15 +6,18 @@
 
 OpenCode CLI的终端监控插件，在侧边栏实时显示Token用量、缓存命中率与模型响应速度，并支持一键生成网页版可视化用量报表。
 
+> 本项目是 [TTWK/opencode-tokenwatch](https://github.com/TTWK/opencode-tokenwatch) 的 fork，npm 包名为 `@jasonencode/opencode-tokenwatch`。
+
 ---
 
 ## 主要特性
 
 - **侧边栏实时看板**：会话中随时查看各模型的输入输出Token、预估花费、缓存命中率，以及当前会话的平均首字延迟与生成速率。
 - **缓存命中率与趋势**：按模型追踪缓存利用效率，用箭头标注近几次请求的命中率是在上升还是下降。
+- **上下文窗口占用**：显示当前会话最后一个 assistant 请求的上下文用量（已用 / 模型上限 / 百分比），接近上限时变色提醒；压缩（`/compact`）后会随最新消息回落。
 - **Token构成归类**：自动将Token按系统提示词、用户输入、工具调用和模型输出分别统计，清楚定位上下文占用大头。
 - **交互式用量报告**：在终端输入 `/usage` 即可在浏览器中打开ECharts 交互仪表盘，查看历史用量趋势、模型横向对比与失败请求统计；也可一键导出为JSON或Markdown文件。
-- **双版本无缝适配**：同时兼容 OpenCode 1.x 与 OpenCode 2（beta），自动识别宿主环境，无需手动切换或调整配置。
+- **面向 OpenCode 2.x**：基于 2.1.3 的 Plugin API 与 OpenTUI 0.6.6 构建，直接使用宿主提供的实时事件与侧边栏插槽。
 
 ---
 
@@ -22,24 +25,43 @@ OpenCode CLI的终端监控插件，在侧边栏实时显示Token用量、缓存
 
 ### 1. 安装
 
-在项目中运行：
+推荐使用 OpenCode 自带的插件管理器（会安装到全局插件缓存并写入全局配置）：
 
 ```sh
-npm install opencode-tokenwatch
+opencode plugin add @jasonencode/opencode-tokenwatch
 ```
 
-### 2. 启用插件
+需要固定版本时：
 
-在配置文件 `opencode.json`（或 `opencode.jsonc`）中添加插件项：
+```sh
+opencode plugin add @jasonencode/opencode-tokenwatch@0.7.0
+```
+
+### 2. 升级 / 启用
+
+`opencode plugin add` 会自动启用插件。升级已安装的旧版本：
+
+```sh
+opencode plugin update
+```
+
+如果升级后仍加载旧版本，删除对应缓存目录后重新安装：
+
+- Windows：`%USERPROFILE%\.cache\opencode\npm\@jasonencode\opencode-tokenwatch@latest`
+- macOS / Linux：`~/.cache/opencode/npm/@jasonencode/opencode-tokenwatch@latest`
+
+> scoped 包会在 `npm` 目录下多一层 `@jasonencode` 子目录。
+
+本地开发（尚未发布）时，可在项目的 `opencode.json`（或 `opencode.jsonc`）里用绝对路径指向本仓库：
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-tokenwatch"]
+  "plugins": ["/absolute/path/to/opencode-tokenwatch"]
 }
 ```
 
-重新打开 OpenCode，侧边栏便会自动载入 TokenWatch 面板。
+> OpenCode 2.x 按包名解析插件时会优先使用自身缓存；如果缓存里仍是旧版本，仅修改项目配置不会自动刷新。用 `opencode plugin add/update` 可保证缓存与配置同步。若只希望在 CLI 侧启用（例如连接远程服务端），也可在 `cli.json` 中配置同样的 `"plugins"` 数组。
 
 ---
 
@@ -55,8 +77,8 @@ npm install opencode-tokenwatch
 
 ## 系统要求
 
-- **OpenCode CLI**：1.18+ 或 OpenCode 2（`@opencode-ai/cli@beta`）
-- **Node.js**：≥ 18.0.0
+- **OpenCode CLI**：2.x（以 2.1.3 为基线）
+- **OpenTUI**：≥ 0.6.6（由 OpenCode 宿主提供，无需单独安装）
 
 ---
 

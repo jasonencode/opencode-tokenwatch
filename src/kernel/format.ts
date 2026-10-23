@@ -79,7 +79,7 @@ export interface ErrorStats {
   successCount: number
   /** 失败请求数（tokens.total == 0 的 assistant） */
   failedCount: number
-  /** 失败率：failedCount / (successCount + failedCount)，小数口径（0~1），两代宿主一致 */
+  /** 失败率：failedCount / (successCount + failedCount)，小数口径（0~1），全项目一致 */
   errorRate: number
   /** 按模型细化的失败数 */
   byModel: Array<{ provider: string; model: string; failed: number; total: number }>
@@ -107,6 +107,11 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
+}
+
+/** 紧凑 token 数：去掉无意义的 `.0`，用于窄侧边栏的一行展示 */
+export function formatTokensShort(n: number): string {
+  return formatTokens(n).replace(/\.0([KMB])$/, "$1")
 }
 
 export function formatCost(n: number): string {

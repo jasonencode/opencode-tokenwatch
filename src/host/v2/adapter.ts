@@ -1,14 +1,14 @@
 /**
- * v2 宿主适配层：把 opencode2 的 `Plugin Context` 折叠为统一 `HostAdapter`。
+ * v2 宿主适配层：把 OpenCode 2.x 的 `Plugin Context` 折叠为统一 `HostAdapter`。
  *
- * 与 v1 的关键差异（均在此处吸收，上层无感）：
- * - 事件：`message.updated` 被拆成 `session.step.started/ended`、`session.message.content.updated`
- * - 插槽：`sidebar_content` → 点号路径 `sidebar.content`，且为单对象参数
- * - 主题：扁平 RGBA → 嵌套 token 树（`text.default` / `text.subdued` / `text.action.*`）
- * - 存储：`kv.get/set` → 响应式 `storage.store` + 异步 mutate
- * - 命令：`command.register` → `keymap.layer`
- * - 消息 part：需二次查询 → 消息内直接内嵌 `content`
+ * 关键差异（均在此处吸收，上层无感）：
+ * - 事件：`session.step.ended` + 内嵌在消息里的 `content`
+ * - 插槽：点号路径 `sidebar.content`，且为单对象参数
+ * - 主题：嵌套 token 树（`text.base` / `text.muted` / `text.action.*`，旧名回退）
+ * - 存储：响应式 `storage.store` + 异步 mutate
+ * - 命令：`keymap.layer`
  */
+import type { Context } from "@opencode/plugin/tui/context"
 import { getUsageReport, isUsageCacheCold, markUsageCacheDirty } from "./data-source.js"
 import type {
   HostAdapter,
@@ -22,71 +22,32 @@ import type {
   UsageDataSource,
 } from "../types.js"
 
-/** v2 插件 Context 的最小结构约束（避免对 beta SDK 的硬类型依赖） */
-export interface V2Context {
-  readonly app: { readonly version: string; readonly channel: string }
-  readonly theme: any
-  readonly themeMode: "dark" | "light"
-  readonly data: {
-    readonly on: (type: string, handler: (event: any) => void) => () => void
-    readonly session: {
-      list(): any[]
-      get(sessionID: string): any | undefined
-      readonly message: {
-        list(sessionID: string): any[]
-        get(sessionID: string, messageID: string): any | undefined
-        sync(sessionID: string): Promise<void>
-        invalidate(sessionID: string): void
-      }
-      sync(sessionID: string): Promise<void>
-    }
-    readonly location: {
-      readonly agent: { list(location?: any): any[] | undefined }
-    }
-  }
-  readonly ui: {
-    readonly slot: (claim: any) => () => void
-    readonly toast: { show(options: { message: string; variant?: string; title?: string }): void }
-    readonly dialog: {
-      alert(options: { title: string; message: string }): Promise<void>
-      select<Value>(options: {
-        title: string
-        options: readonly { title: string; value: Value; description?: string }[]
-      }): Promise<Value | undefined>
-    }
-  }
-  readonly keymap: { layer(input: () => any): void }
-  readonly storage: {
-    store<Value extends object>(key: string, options: { readonly initial: Value }): readonly [any, (m: (draft: Value) => void) => Promise<void>]
-  }
-  readonly client: any
-}
-
 /** v2 主题是嵌套 token 树，映射到内核使用的扁平色 */
-function readTheme(ctx: V2Context): ThemeColors {
-  const t = ctx.theme ?? {}
-  const fallback = t?.text?.default
-  const actionPrimary = t?.text?.action?.primary?.default
+function readTheme(ctx: Context): ThemeColors {
+  const t = (ctx.theme ?? {}) as any
+  // 2.1.3 将 default → base、subdued → muted；保留旧名回退以兼容早期 2.x beta
+  const textBase = t?.text?.base ?? t?.text?.default
+  const actionPrimary = t?.text?.action?.primary?.base ?? t?.text?.action?.primary?.default
   const feedback = t?.text?.feedback ?? {}
   return {
-    primary: actionPrimary ?? fallback,
-    text: t?.text?.default ?? fallback,
-    textMuted: t?.text?.subdued ?? fallback,
-    background: t?.background?.default ?? fallback,
-    border: t?.border?.default ?? fallback,
-    success: feedback?.success?.default ?? fallback,
-    warning: feedback?.warning?.default ?? fallback,
-    error: feedback?.error?.default ?? fallback,
+    primary: actionPrimary ?? textBase,
+    text: textBase,
+    textMuted: t?.text?.muted ?? t?.text?.subdued ?? textBase,
+    background: t?.background?.base ?? t?.background?.default ?? textBase,
+    border: t?.border?.base ?? t?.border?.default ?? textBase,
+    success: feedback?.success?.base ?? feedback?.success?.default ?? textBase,
+    warning: feedback?.warning?.base ?? feedback?.warning?.default ?? textBase,
+    error: feedback?.error?.base ?? feedback?.error?.default ?? textBase,
   }
 }
 
 /**
- * 用 v2 的响应式 store 模拟 v1 的 kv 语义。
+ * 用宿主响应式 store 实现上层需要的同步 KV 语义。
  *
  * v2 的 `storage.store` 只接受对象初值并提供异步 mutate，
  * 因此这里把所有 kv 键收拢到一个 `values` 映射下面。
  */
-function makeStore(ctx: V2Context, dispose: Set<() => void>): KeyValueStore {
+function makeStore(ctx: Context): KeyValueStore {
   const [state, mutate] = ctx.storage.store<{ values: Record<string, unknown> }>("tokenwatch", {
     initial: { values: {} },
   })
@@ -113,7 +74,7 @@ function makeStore(ctx: V2Context, dispose: Set<() => void>): KeyValueStore {
   }
 }
 
-/** v2 消息内嵌 content，归一化为 v1 part 形状以复用上层分布估算 */
+/** 消息内嵌 content，归一化为内核使用的 part 形状以复用上层分布估算 */
 function normalizeParts(message: any): any[] {
   const content = message?.content
   if (!Array.isArray(content)) return []
@@ -154,20 +115,34 @@ function stringifyToolContent(content: any): string {
   return out
 }
 
+/** step.started 里携带、step.ended 里缺失的元信息（model / 请求起点） */
+interface StepMeta {
+  providerID: string
+  modelID: string
+  started?: number
+}
+
 /**
  * v2 侧：把 `session.step.ended` + 消息详情折叠为归一化事件。
  *
- * step.ended 自带 tokens/cost/finish，但不含 model（model 在 step.started，
- * 更可靠的是直接查消息对象）。这里以 assistantMessageID 为准回查消息，
- * 拿到 model/provider 后再归一化。
+ * step.ended 自带 tokens/cost/finish，但不含 model / 时间（model 在
+ * step.started）。这里以 assistantMessageID 为准回查 assistant 消息；
+ * 回查失败时用 step.started 缓存的元信息兜底。
  */
-function buildMessageEvent(ctx: V2Context, data: any): NormalizedMessageEvent | null {
+function buildMessageEvent(
+  ctx: Context,
+  event: any,
+  stepMeta: Map<string, StepMeta>,
+): NormalizedMessageEvent | null {
+  const data = event?.data ?? {}
   const sessionID = data?.sessionID ?? ""
   const messageID = data?.assistantMessageID ?? ""
   const tokens = data?.tokens ?? {}
   const cache = tokens.cache ?? {}
   const message = messageID ? ctx.data.session.message.get(sessionID, messageID) : undefined
-  const model = message?.model ?? {}
+  // SessionMessageInfo 是 tagged union：只有 assistant 变体带 model / 时间
+  const assistant = message?.type === "assistant" ? message : undefined
+  const meta = messageID ? stepMeta.get(messageID) : undefined
 
   const total =
     (tokens.input ?? 0) +
@@ -180,8 +155,8 @@ function buildMessageEvent(ctx: V2Context, data: any): NormalizedMessageEvent | 
     messageID,
     sessionID,
     role: "assistant",
-    providerID: model.providerID ?? "unknown",
-    modelID: model.id ?? "unknown",
+    providerID: assistant?.model?.providerID ?? meta?.providerID ?? "unknown",
+    modelID: assistant?.model?.id ?? meta?.modelID ?? "unknown",
     input: tokens.input ?? 0,
     output: tokens.output ?? 0,
     reasoning: tokens.reasoning ?? 0,
@@ -189,22 +164,24 @@ function buildMessageEvent(ctx: V2Context, data: any): NormalizedMessageEvent | 
     cacheWrite: cache.write ?? 0,
     total,
     cost: typeof data?.cost === "number" ? data.cost : 0,
-    // step.ended 事件本身不带时间；从消息对象补齐（性能追踪需要 created/completed）。
+    // step.ended 事件本身不带时间；从 assistant 消息补齐（性能追踪需要 created/completed）。
     // TPS 的流式终点优先取 time.streamed（provider 响应体接收完毕，剔除收尾
-    // settlement 时间），与宿主官方 tok/s 口径一致；缺失时回退 completed。
-    timeCreated: message?.time?.created ?? data?.time?.created,
-    timeCompleted: message?.time?.streamed ?? message?.time?.completed ?? data?.time?.completed,
+    // settlement 时间），与宿主官方 tok/s 口径一致；缺失时回退 completed / 事件时间。
+    timeCreated: assistant?.time?.created ?? meta?.started,
+    timeCompleted:
+      assistant?.time?.streamed ?? assistant?.time?.completed ?? event?.created,
     raw: data,
   }
 }
 
-export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostAdapter {
+export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAdapter {
   let storeRef: KeyValueStore | undefined
   /** 待挂载的 keymap layer 注册动作，由 registerSidebar 在 slot 渲染时执行 */
   let mountKeymapLayer: (() => void) | undefined
+  /** step.started → step.ended 之间需要保留的元信息（model / 请求起点） */
+  const stepMeta = new Map<string, StepMeta>()
 
   const clientScanDataSource: UsageDataSource = {
-    kind: "client-scan",
     // v2 没有 `opencode db`，历史统计需遍历会话消息重算，首次必须提示用户
     needsFirstRunNotice: true,
     isCold: () => isUsageCacheCold(),
@@ -212,11 +189,10 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
   }
 
   return {
-    kind: "v2",
     hostVersion: ctx.app?.version ?? "2.x",
     theme: () => readTheme(ctx),
     get store(): KeyValueStore {
-      if (!storeRef) storeRef = makeStore(ctx, dispose)
+      if (!storeRef) storeRef = makeStore(ctx)
       return storeRef
     },
 
@@ -225,9 +201,19 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
 
       off.push(
         ctx.data.on("session.step.ended", (event: any) => {
-          const normalized = buildMessageEvent(ctx, event?.data)
-          if (normalized) handlers.onMessageUpdated(normalized)
+          const normalized = buildMessageEvent(ctx, event, stepMeta)
+          if (normalized) {
+            stepMeta.delete(normalized.messageID)
+            handlers.onMessageUpdated(normalized)
+          }
           handlers.onInvalidate()
+        }),
+      )
+      off.push(
+        ctx.data.on("session.step.failed", (event: any) => {
+          // 失败步不会走 step.ended，清掉兜底元信息避免长期驻留
+          const messageID = event?.data?.assistantMessageID
+          if (messageID) stepMeta.delete(messageID)
         }),
       )
       // TPS 流式窗口起点（对齐宿主官方 tok/s 口径 output/(streamed−created)）：
@@ -236,6 +222,15 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
       off.push(
         ctx.data.on("session.step.started", (event: any) => {
           const data = event?.data ?? {}
+          if (data.assistantMessageID) {
+            // 消息回查失败时的兜底元信息；cap 防止异常会话无限增长
+            if (stepMeta.size > 500) stepMeta.clear()
+            stepMeta.set(data.assistantMessageID, {
+              providerID: data.model?.providerID ?? "unknown",
+              modelID: data.model?.id ?? "unknown",
+              started: data.started ?? event?.created,
+            })
+          }
           const part: NormalizedPartEvent = {
             messageID: data.assistantMessageID,
             type: "step",
@@ -297,11 +292,9 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
           handlers.onPartUpdated(part)
         }),
       )
-      off.push(
-        ctx.data.on("session.message.content.updated", () => {
-          handlers.onInvalidate()
-        }),
-      )
+      // 注意：2.1.3 的实时事件流（OpenCodeEvent）不包含
+      // `session.message.content.updated`（该事件仅走 durable 回放）。
+      // 侧边栏在 step.ended / step 事件到达时刷新即可，无需逐 delta 重绘。
       off.push(
         ctx.data.on("session.idle", () => {
           // 空闲 = 一步请求已落库：标记用量缓存脏，下次 /usage 后台重建
@@ -342,15 +335,14 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
     },
 
     registerCommands(specs) {
-      // v2 的 keymap.layer（= Keymap.createLayer）内部先 useValue() 读 Keymap
-      // Provider 上下文，再经 useBindings 调 createEffect —— 两者都要求调用方
-      // 处于宿主组件树内且拥有 Solid owner。而 setup() 在无 owner 的 Promise
-      // 链中执行，直接调用必抛 "Keymap.Provider is missing"。slot render 由
-      // 宿主 createComponent 挂载（body 只跑一次、带 owner、在组件树内），
-      // 是插件唯一合法挂载点：把注册动作存起来，由 registerSidebar 在 slot
-      // 挂载时执行。
-      let mountFailed = false
-      const mount = () => {
+      // 2.1.3 文档允许在 setup 内（含 await 之后）调用 keymap.layer，因此先
+      // 直接注册；部分早期 2.x beta 会因 setup 无 Solid owner 抛
+      // "Keymap.Provider is missing"，此时退回由 prompt.footer 插槽在组件树
+      // 内挂载（见 registerSidebar），两种宿主都能拿到命令。
+      let mounted = false
+      let reported = false
+      const mount = (reportError: boolean) => {
+        if (mounted) return
         try {
           ctx.keymap.layer(() => ({
             mode: "global",
@@ -366,20 +358,23 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
               },
             })),
           }))
+          mounted = true
+          mountKeymapLayer = undefined
         } catch (err) {
-          // 失败必须可见：命令静默消失比报错更难排查（与 tui.tsx setup 约定一致）
-          if (!mountFailed) {
-            mountFailed = true
-            try {
-              const message = err instanceof Error ? err.message : String(err)
-              ctx.ui?.toast?.show({ message: `TokenWatch commands unavailable: ${message}`, variant: "error" })
-            } catch { /* host may not expose toast */ }
-          }
+          // 首次失败是预期的 owner 约束，静默等待 slot 挂载；若挂载仍失败，
+          // 必须让用户看到原因（命令静默消失比报错更难排查）。
+          if (!reportError || reported) return
+          reported = true
+          try {
+            const message = err instanceof Error ? err.message : String(err)
+            ctx.ui?.toast?.show({ message: `TokenWatch commands unavailable: ${message}`, variant: "error" })
+          } catch { /* host may not expose toast */ }
         }
       }
-      mountKeymapLayer = mount
+      mountKeymapLayer = () => mount(true)
+      mount(false)
       return () => {
-        if (mountKeymapLayer === mount) mountKeymapLayer = undefined
+        mountKeymapLayer = undefined
       }
     },
 
@@ -445,9 +440,37 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
       }
     },
 
-    onPartUpdated(handler: () => void) {
+    modelContextLimit(providerID: string, modelID: string) {
       try {
-        return ctx.data.on("session.message.content.updated", () => handler())
+        const models = ctx.data.location.model.list() ?? []
+        for (const raw of models as any[]) {
+          const id = String(raw?.id ?? "")
+          const provider = String(raw?.providerID ?? raw?.provider?.id ?? "")
+          const model = String(raw?.modelID ?? raw?.id ?? "")
+          const sameProvider = provider === providerID || id === `${providerID}/${modelID}`
+          const sameModel = model === modelID || id === modelID || id === `${providerID}/${modelID}` || id.endsWith(`/${modelID}`)
+          if (!sameProvider || !sameModel) continue
+          const limit = raw?.limit?.context
+          if (typeof limit === "number" && limit > 0) return limit
+        }
+      } catch { /* ignore */ }
+      return undefined
+    },
+
+    onPartUpdated(handler: () => void) {
+      // 2.1.3 无 `session.message.content.updated` 实时事件；用内容增量事件
+      // 作为 part 更新信号（调用方已按 ~2Hz 节流）。
+      try {
+        const off = [
+          ctx.data.on("session.text.delta", () => handler()),
+          ctx.data.on("session.reasoning.delta", () => handler()),
+          ctx.data.on("session.tool.progress", () => handler()),
+        ]
+        return () => {
+          for (const fn of off) {
+            try { fn() } catch { /* ignore */ }
+          }
+        }
       } catch {
         return () => {}
       }

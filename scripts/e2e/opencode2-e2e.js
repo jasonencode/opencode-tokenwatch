@@ -1,4 +1,6 @@
-// 无头端到端验证：node-pty 驱动真实 opencode2 (beta)。
+// 无头端到端验证：node-pty 驱动真实 OpenCode 2.x TUI。
+// 使用临时项目目录 + 指向本仓库的 plugins 配置，避免依赖用户全局配置。
+const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const pty = require("node-pty");
@@ -15,13 +17,28 @@ const RESPONSES = [
   [/\x1b\[\?2026\$p/, "\x1b[?2026;2$y"],
 ];
 
-const term = pty.spawn("cmd.exe", ["/c", "opencode2"], {
-  name: "xterm-256color",
-  cols: 120,
-  rows: 34,
-  cwd: path.join(os.homedir()),
-  env: process.env,
-});
+const repoRoot = path.resolve(__dirname, "../..").replace(/\\/g, "/");
+const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenwatch-e2e-"));
+fs.writeFileSync(
+  path.join(projectDir, "opencode.json"),
+  JSON.stringify({
+    $schema: "https://opencode.ai/config.json",
+    plugins: [repoRoot],
+  }),
+);
+
+const isWindows = process.platform === "win32";
+const term = pty.spawn(
+  isWindows ? "cmd.exe" : "sh",
+  isWindows ? ["/c", "opencode"] : ["-c", "opencode"],
+  {
+    name: "xterm-256color",
+    cols: 120,
+    rows: 34,
+    cwd: projectDir,
+    env: process.env,
+  },
+);
 
 let buf = "";
 const answered = [];
@@ -42,7 +59,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(25000);
     let v = strip(buf);
     console.log("BOOT:", /Ask anything/.test(v), "| chars:", v.length);
-    if (!/Ask anything|Greeting/.test(v)) {
+    if (!/Ask anything/.test(v)) {
       console.log("TAIL:", JSON.stringify(v.slice(-500)));
       process.exit(2);
     }
@@ -50,22 +67,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     term.write("/us");
     await sleep(3000);
     v = strip(buf);
-    console.log("COMPLETION usage:", /usage/.test(v), "| TokenWatch:", /TokenWatch/.test(v));
-    console.log("TAIL_AFTER_US:", JSON.stringify(strip(v).slice(-700)));
+    console.log("COMPLETION usage:", /\/usage/.test(v));
+    console.log("TAIL_AFTER_US:", JSON.stringify(v.slice(-700)));
 
     term.write("age");
     await sleep(1500);
     term.write("\r");
-    await sleep(5000);
+    await sleep(8000);
     v = strip(buf);
-    console.log("TAIL_AFTER_ENTER:", JSON.stringify(v.slice(-900)));
+    console.log("TAIL_AFTER_ENTER:", JSON.stringify(v.slice(-1200)));
+    const htmlIdx = v.indexOf("HTML");
+    if (htmlIdx >= 0) console.log("MENU_CONTEXT:", JSON.stringify(v.slice(Math.max(0, htmlIdx - 120), htmlIdx + 320)));
     const hits = ["HTML", "JSON"].filter((k) => v.includes(k)).length;
     console.log("MENU_HITS:", hits, "/2");
-    console.log("VERDICT:", /usage/.test(v) && hits >= 2 ? "PASS" : "CHECK_MANUALLY");
+    console.log("VERDICT:", /\/usage/.test(v) && hits >= 2 ? "PASS" : "CHECK_MANUALLY");
   } catch (e) {
     console.error("ERR:", e);
   } finally {
     try { term.kill(); } catch {}
-    setTimeout(() => process.exit(0), 500);
+    setTimeout(() => {
+      try { fs.rmSync(projectDir, { recursive: true, force: true }); } catch {}
+      process.exit(0);
+    }, 1000);
   }
 })();

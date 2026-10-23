@@ -6,15 +6,18 @@
 
 A terminal monitoring plugin for OpenCode CLI that displays real-time token usage, cache hit rate, and model throughput in the sidebar, with one-click interactive browser reports.
 
+> This is a fork of [TTWK/opencode-tokenwatch](https://github.com/TTWK/opencode-tokenwatch), published as `@jasonencode/opencode-tokenwatch`.
+
 ---
 
 ## Key Features
 
 - **Real-time Sidebar Dashboard**: Check input/output tokens, estimated cost, cache hit rate, and average TTFT & generation speed per model during sessions.
 - **Cache Hit Rate & Trends**: Track cache efficiency per model, with arrows showing whether the hit rate for recent requests is trending up or down.
+- **Context Window Usage**: Shows context usage from the latest assistant request in the current session (used / model limit / percentage), with color warnings near the limit; the value drops after compaction (`/compact`).
 - **Token Breakdown**: Automatically breaks down tokens into system prompt, user input, tool execution, and assistant output to identify major context consumers.
 - **Interactive Usage Reports**: Type `/usage` in the terminal to launch an ECharts interactive dashboard in your browser with historical trends, cross-model comparisons, and failed request stats; export to JSON or Markdown with one click.
-- **Dual-Host Compatibility**: Seamlessly works with both OpenCode 1.x and OpenCode 2 (beta). Automatically detects the host environment with zero manual configuration.
+- **Built for OpenCode 2.x**: targets the 2.1.3 Plugin API and OpenTUI 0.6.6, using the host's live events and sidebar slot directly.
 
 ---
 
@@ -22,24 +25,43 @@ A terminal monitoring plugin for OpenCode CLI that displays real-time token usag
 
 ### 1. Install
 
-Run in your project directory:
+Use OpenCode's built-in plugin manager (installs into the global plugin cache and updates the global config):
 
 ```sh
-npm install opencode-tokenwatch
+opencode plugin add @jasonencode/opencode-tokenwatch
 ```
 
-### 2. Enable Plugin
+To pin a version:
 
-Add the plugin entry to `opencode.json` (or `opencode.jsonc`):
+```sh
+opencode plugin add @jasonencode/opencode-tokenwatch@0.7.0
+```
+
+### 2. Upgrade / Enable
+
+`opencode plugin add` enables the plugin automatically. To upgrade an installed older version:
+
+```sh
+opencode plugin update
+```
+
+If the old version is still loaded after upgrading, delete its cache directory and reinstall:
+
+- Windows: `%USERPROFILE%\.cache\opencode\npm\@jasonencode\opencode-tokenwatch@latest`
+- macOS / Linux: `~/.cache/opencode/npm/@jasonencode/opencode-tokenwatch@latest`
+
+> Scoped packages add a nested `@jasonencode` directory under `npm`.
+
+For local development (before publishing), point `opencode.json` (or `opencode.jsonc`) at this repository with an absolute path:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-tokenwatch"]
+  "plugins": ["/absolute/path/to/opencode-tokenwatch"]
 }
 ```
 
-Restart OpenCode and the TokenWatch panel will load in the sidebar automatically.
+> OpenCode 2.x resolves package-name plugins through its own cache first. If that cache still holds the old version, editing the project config alone will not refresh it; run `opencode plugin add/update`. For CLI-only usage (for example, against a remote server), add the same `"plugins"` array to `cli.json`.
 
 ---
 
@@ -55,8 +77,8 @@ Type `/usage` in the terminal input to open the action menu:
 
 ## Requirements
 
-- **OpenCode CLI**: 1.18+ or OpenCode 2 (`@opencode-ai/cli@beta`)
-- **Node.js**: ≥ 18.0.0
+- **OpenCode CLI**: 2.x (baseline: 2.1.3)
+- **OpenTUI**: ≥ 0.6.6 (provided by the OpenCode host)
 
 ---
 

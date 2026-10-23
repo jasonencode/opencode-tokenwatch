@@ -1,4 +1,4 @@
-// TPS 口径回归：模拟 opencode2 事件序列（step → reasoning → text → step.ended），
+// TPS 口径回归：模拟 OpenCode 2.x 事件序列（step → reasoning → text → step.ended），
 // 断言插件 TPS 与宿主官方口径 output/(time.streamed - time.created) 一致，
 // 且 TTFT = 首个可见输出 part（reasoning）- step 起点。
 //

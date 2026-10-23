@@ -37,13 +37,6 @@ interface MessageUpdateEvent {
   }
 }
 
-interface MessageRemoveEvent {
-  properties: {
-    sessionID?: string
-    messageID?: string
-  }
-}
-
 class PerfTracker {
   /** 最早的任意 part（含 step 起点）—— 用作 TPS 的流式窗口起点（对齐宿主官方口径） */
   private firstPartTimes = new Map<string, number>()
@@ -60,15 +53,12 @@ class PerfTracker {
     if (event.time.start < cur) {
       this.firstPartTimes.set(event.message_id, event.time.start)
     }
-    // TTFT 只统计"首 token"锚点：v1 的输出 part（text/reasoning/tool 的
-    // time.start 即首 token）与 v2 的 delta 事件（首个内容片段）。
-    // 窗口锚点（v2 的 step / part-open，v1 的 step-start / step-finish，
-    // 以及一切 *-started 占位符打开事件）标记的是"请求/阶段开始"而非首
-    // token，只参与 TPS 窗口，不参与 TTFT —— 否则 v1 的 TTFT 会恒为毫秒级。
+    // TTFT 只统计"首 token"锚点：v2 的 delta 事件（首个内容片段）。
+    // 窗口锚点（step / part-open，以及一切 *-started 占位符打开事件）标记的是
+    // "请求/阶段开始"而非首 token，只参与 TPS 窗口，不参与 TTFT。
     const type = event.type
     const isDelta = type != null && type.endsWith("-delta")
     const isWindowAnchor = type === "step" || type === "part-open"
-      || type === "step-start" || type === "step-finish"
       || (type != null && type.endsWith("-started"))
     const isFirstTokenAnchor = isDelta || !isWindowAnchor
     if (isFirstTokenAnchor) {
@@ -167,14 +157,6 @@ class PerfTracker {
     // 无论 JSONL 写入是否成功，都尝试更新持久化聚合统计
     // 这样即使日志被轮转，历史统计数据也永不丢失
     updatePersistedStats(entry)
-  }
-
-  handleMessageRemoved(event: MessageRemoveEvent): void {
-    const mid = event.properties?.messageID ?? ""
-    if (mid) {
-      this.firstPartTimes.delete(mid)
-      this.firstOutputTimes.delete(mid)
-    }
   }
 
   private updateStats(model: string, entry: LogEntry): void {

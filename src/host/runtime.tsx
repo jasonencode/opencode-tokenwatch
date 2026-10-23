@@ -1,10 +1,9 @@
 /** @jsxImportSource @opentui/solid */
 /**
- * 共享启动器 —— 两代宿主共用的装配逻辑。
+ * 共享启动器 —— 插件装配逻辑。
  *
  * 职责：把 HostAdapter 提供的事件流接进性能追踪器与会话消息聚合，
  * 侧边栏插槽渲染 TokenWatchPanel，处理 KV 持久化与历史会话重建。
- * v1 / v2 的差异已全部折叠进 adapter，本文件对宿主零感知。
  */
 import { createSignal } from "solid-js"
 import { TokenWatchPanel } from "../ui/sidebar.js"
@@ -16,7 +15,7 @@ function kvKey(sessionID: string): string {
   return "tokenwatch-msgs-" + sessionID
 }
 
-/** 归一化消息 → 性能追踪器输入（v1 事件形状，追踪器内部约定） */
+/** 归一化消息 → 性能追踪器输入（追踪器内部约定的消息形状） */
 function toPerfMessageEvent(e: NormalizedMessageEvent) {
   return {
     properties: {
@@ -53,16 +52,15 @@ function toPerfPartEvent(p: NormalizedPartEvent) {
 function rebuildFromMessages(sessionID: string, messages: readonly any[]): TokenMessage[] {
   const out: TokenMessage[] = []
   for (const msg of messages) {
-    // v1 的 state.session.messages 形状随宿主版本变动：平铺字段可能嵌在 info 层，
-    // 逐字段做双层兜底，避免重建得到空数组
+    // 宿主消息形状随版本变动：平铺字段可能嵌在 info 层，逐字段做双层兜底
     const info = msg?.info ?? {}
     const m = { ...info, ...msg }
-    // v1 消息带 role，v2 消息带 type —— 两者都接受
+    // 统一投影为 type；防御性兼容 role 字段
     const kind = m.type ?? m.role
     if (kind !== "assistant") continue
     const tokens = m.tokens
     if (!tokens) continue
-    // v2 的 TokenUsageInfo 没有 total 字段，按五分量现算
+    // TokenUsageInfo 没有 total 字段，按五分量现算
     const total =
       (tokens.input ?? 0) + (tokens.output ?? 0) + (tokens.reasoning ?? 0) +
       (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0)
@@ -70,9 +68,9 @@ function rebuildFromMessages(sessionID: string, messages: readonly any[]): Token
     out.push({
       id: m.id,
       sessionID,
-      // v1 平铺 providerID/modelID；v2 嵌套在 model 里
-      providerID: m.model?.providerID ?? m.providerID ?? "unknown",
-      modelID: m.model?.id ?? m.modelID ?? "unknown",
+      // 模型信息嵌套在 model 里
+      providerID: m.model?.providerID ?? "unknown",
+      modelID: m.model?.id ?? "unknown",
       inputTokens: tokens.input ?? 0,
       outputTokens: tokens.output ?? 0,
       reasoningTokens: tokens.reasoning ?? 0,
@@ -201,7 +199,7 @@ export function startTokenWatch(host: HostAdapter): () => void {
     }, 200)
   }
 
-  // ── 事件订阅（adapter 已归一化两代差异）──
+  // ── 事件订阅（adapter 已归一化宿主事件）──
   const unsubscribe = host.subscribe({
     onMessageUpdated(event) {
       perfTracker.handleMessageUpdated(toPerfMessageEvent(event))
@@ -209,7 +207,10 @@ export function startTokenWatch(host: HostAdapter): () => void {
 
       // 聚合当前 TUI 内存模型（与 rebuildFromMessages 同一套过滤规则）。
       // 事件处理器是串行的，先读后写不与 updater 副作用混用，保持 setSignal 纯净。
-      if (event.role === "assistant" && event.total > 0) {
+      // 多会话标签页里后台会话也会发 step.ended：只并入当前会话，避免污染侧边栏；
+      // 后台会话的数据在切换到它时由 host 消息 / KV 重建。
+      const belongsToCurrent = !currentSessionID || event.sessionID === currentSessionID
+      if (belongsToCurrent && event.role === "assistant" && event.total > 0) {
         const msg: TokenMessage = {
           id: event.messageID,
           sessionID: event.sessionID,

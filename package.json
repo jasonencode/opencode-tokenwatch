@@ -1,6 +1,6 @@
 {
-  "name": "opencode-tokenwatch",
-  "version": "0.6.1",
+  "name": "@jasonencode/opencode-tokenwatch",
+  "version": "0.7.0",
   "description": "Real-time token usage, cache analytics & performance dashboard plugin for OpenCode CLI",
   "type": "module",
   "main": "./dist/server.js",
@@ -12,10 +12,7 @@
     },
     "./tui": {
       "types": "./dist/tui.d.ts",
-      "import": "./dist/tui.js",
-      "config": {
-        "enabled": true
-      }
+      "import": "./dist/tui.js"
     },
     "./server": {
       "types": "./dist/server.d.ts",
@@ -44,39 +41,53 @@
     "tokens",
     "usage",
     "stats",
-    "sqlite",
     "analytics",
     "tui"
   ],
   "license": "MIT",
-  "author": "TTWK",
+  "author": "jasonencode",
+  "contributors": [
+    "TTWK"
+  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TTWK/opencode-tokenwatch.git"
+    "url": "git+https://github.com/jasonencode/opencode-tokenwatch.git"
   },
   "bugs": {
-    "url": "https://github.com/TTWK/opencode-tokenwatch/issues"
+    "url": "https://github.com/jasonencode/opencode-tokenwatch/issues"
   },
-  "homepage": "https://github.com/TTWK/opencode-tokenwatch#readme",
-  "dependencies": {
-    "@opentui/core": "^0.5.11",
-    "@opentui/solid": "^0.5.11",
-    "solid-js": ">=1.9.0"
-  },
+  "homepage": "https://github.com/jasonencode/opencode-tokenwatch#readme",
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.30",
-    "@opentui/keymap": "^0.5.11",
+    "@opencode/plugin": "2.1.3",
+    "@opentui/core": "^0.6.6",
+    "@opentui/solid": "^0.6.6",
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
     "esbuild-plugin-solid": "^0.5.0",
+    "solid-js": "1.9.12",
     "typescript": "^5.7.0"
   },
   "publishConfig": {
     "access": "public"
   },
   "peerDependencies": {
-    "@opentui/core": ">=0.5.0",
-    "@opentui/solid": ">=0.5.0",
+    "@opencode/plugin": ">=2.1.3 <3.0.0",
+    "@opentui/core": ">=0.6.6",
+    "@opentui/solid": ">=0.6.6",
     "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    },
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
   }
 }
