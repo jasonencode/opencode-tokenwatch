@@ -11,7 +11,7 @@
 import type { LogEntry, ModelPerfStats } from "./format.js"
 
 /** 线性插值百分位数，输入须为升序数组 */
-export function computePercentile(sortedArr: number[], p: number): number | null {
+function computePercentile(sortedArr: number[], p: number): number | null {
   if (sortedArr.length === 0) return null
   if (sortedArr.length === 1) return sortedArr[0]
   const idx = (p / 100) * (sortedArr.length - 1)
@@ -22,13 +22,13 @@ export function computePercentile(sortedArr: number[], p: number): number | null
 }
 
 /** 每 marker 最多保留的原始样本数（Reservoir Sampling，内存有界） */
-export const RESERVOIR_SIZE = 500
+const RESERVOIR_SIZE = 500
 
 /**
  * Reservoir Sampling：保证每个观测值以相同概率进入样本（算法 R 变体），
  * 使分位数估算在统计意义上无偏。
  */
-export function reservoirAdd(reservoir: number[], value: number, totalCount: number): number[] {
+function reservoirAdd(reservoir: number[], value: number, totalCount: number): number[] {
   if (reservoir.length < RESERVOIR_SIZE) {
     return [...reservoir, value]
   }

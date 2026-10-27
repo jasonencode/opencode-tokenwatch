@@ -7,13 +7,11 @@ import type { HostAdapter, CommandSpec, SelectOption } from "../types.js"
 import { createCommandActions, rangePresets } from "../command-actions.js"
 import type { SidebarToggleKey } from "../../kernel/config.js"
 import { t, setLanguage } from "../../kernel/i18n.js"
-import type { SupportedLanguage } from "../../kernel/i18n.js"
 
 const TOGGLE_KEYS: readonly SidebarToggleKey[] = [
   "showPerformance",
   "showPricing",
   "showTokenDistribution",
-  "showContext",
   "showTrend",
 ]
 
@@ -21,7 +19,6 @@ const TOGGLE_LABELS: Record<SidebarToggleKey, () => string> = {
   showPerformance: () => t("showPerformance"),
   showPricing: () => t("showPricing"),
   showTokenDistribution: () => t("showTokenDistribution"),
-  showContext: () => t("showContext"),
   showTrend: () => t("showTrend"),
 }
 

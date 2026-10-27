@@ -63,7 +63,7 @@ export function getRangeSlug(filters: UsageFilters, presetTag?: string): string 
 }
 
 /** 生成不覆盖已有文件的报告路径（同名追加时间戳，仍冲突则递增后缀） */
-export function generateUniqueReportPath(dir: string, rangeSlug: string): string {
+function generateUniqueReportPath(dir: string, rangeSlug: string): string {
   const dateStr = localDateStr(new Date())
   const baseName = `tokenwatch-${rangeSlug}-${dateStr}`
   let targetPath = join(dir, `${baseName}.html`)

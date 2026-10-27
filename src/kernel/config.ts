@@ -12,15 +12,14 @@ export interface SidebarConfig {
     showPricing: boolean
     showTokenDistribution: boolean
     showTrend: boolean
-    showContext: boolean
   }
   language: "zh" | "en" | "auto"
 }
 
 export type SidebarToggleKey = keyof SidebarConfig["sidebar"]
 
-export const DEFAULT_CONFIG: SidebarConfig = {
-  sidebar: { showPerformance: true, showPricing: true, showTokenDistribution: true, showTrend: true, showContext: true },
+const DEFAULT_CONFIG: SidebarConfig = {
+  sidebar: { showPerformance: true, showPricing: true, showTokenDistribution: true, showTrend: true },
   language: "auto",
 }
 
@@ -48,7 +47,7 @@ export function loadConfig(store: KeyValueStore, pluginConfig?: Record<string, a
   return base
 }
 
-export function saveConfig(store: KeyValueStore, cfg: SidebarConfig): void {
+function saveConfig(store: KeyValueStore, cfg: SidebarConfig): void {
   store.set(KEY_CONFIG, cfg)
   bumpVersion(store)
 }
@@ -59,7 +58,7 @@ export function saveConfig(store: KeyValueStore, cfg: SidebarConfig): void {
  * 侧边栏用轮询版本号的方式感知"设置在别处被改了"，
  * 因为插件自己的 KeyValueStore 快照不是响应式的。
  */
-export function bumpVersion(store: KeyValueStore): void {
+function bumpVersion(store: KeyValueStore): void {
   const v = (store.get<number>(KEY_VERSION, 0) ?? 0) + 1
   store.set(KEY_VERSION, v)
 }

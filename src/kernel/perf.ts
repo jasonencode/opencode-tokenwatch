@@ -1,6 +1,6 @@
 import type { LogEntry, ModelPerfStats, SessionPerfStats } from "./format.js"
 import { accumulateEntry, createAccumulator, finalizeAccumulator, type ModelAccumulator } from "./perf-aggregate.js"
-import { appendFileSync, readFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs"
+import { appendFileSync, readFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { homedir } from "node:os"
@@ -13,7 +13,6 @@ const LOG_PATH_ROTATED = LOG_PATH + ".1"
 interface PartEvent {
   message_id?: string
   type?: string
-  text?: string
   time?: { start?: number }
 }
 
@@ -218,13 +217,6 @@ class PerfTracker {
     }
   }
 
-  reset(): void {
-    this.loadToken++
-    this.firstPartTimes.clear()
-    this.firstOutputTimes.clear()
-    this.statsMap.clear()
-  }
-
   /**
    * 切换会话：清空内存态后异步重放该会话的 JSONL 历史。
    *
@@ -269,7 +261,7 @@ class PerfTracker {
 export function createPerfTracker(): PerfTracker {
   return new PerfTracker()
 }
-export type { PartEvent, PerfTracker }
+export type { PerfTracker }
 export function readLogs(last: number = 50): LogEntry[] {
   const tracker = new PerfTracker()
   return tracker.readLogs(last)

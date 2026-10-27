@@ -28,16 +28,9 @@ function readTheme(ctx: Context): ThemeColors {
   // 2.1.3 将 default → base、subdued → muted；保留旧名回退以兼容早期 2.x beta
   const textBase = t?.text?.base ?? t?.text?.default
   const actionPrimary = t?.text?.action?.primary?.base ?? t?.text?.action?.primary?.default
-  const feedback = t?.text?.feedback ?? {}
   return {
     primary: actionPrimary ?? textBase,
-    text: textBase,
     textMuted: t?.text?.muted ?? t?.text?.subdued ?? textBase,
-    background: t?.background?.base ?? t?.background?.default ?? textBase,
-    border: t?.border?.base ?? t?.border?.default ?? textBase,
-    success: feedback?.success?.base ?? feedback?.success?.default ?? textBase,
-    warning: feedback?.warning?.base ?? feedback?.warning?.default ?? textBase,
-    error: feedback?.error?.base ?? feedback?.error?.default ?? textBase,
   }
 }
 
@@ -170,7 +163,6 @@ function buildMessageEvent(
     timeCreated: assistant?.time?.created ?? meta?.started,
     timeCompleted:
       assistant?.time?.streamed ?? assistant?.time?.completed ?? event?.created,
-    raw: data,
   }
 }
 
@@ -189,7 +181,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
   }
 
   return {
-    hostVersion: ctx.app?.version ?? "2.x",
     theme: () => readTheme(ctx),
     get store(): KeyValueStore {
       if (!storeRef) storeRef = makeStore(ctx)
@@ -235,7 +226,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
             messageID: data.assistantMessageID,
             type: "step",
             timeStart: event?.created,
-            raw: event,
           }
           handlers.onPartUpdated(part)
         }),
@@ -249,7 +239,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
             messageID: data.assistantMessageID,
             type: "part-open",
             timeStart: event?.created,
-            raw: event,
           }
           handlers.onPartUpdated(part)
         }),
@@ -262,7 +251,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
             messageID: data.assistantMessageID,
             type: "reasoning-delta",
             timeStart: event?.created,
-            raw: event,
           }
           handlers.onPartUpdated(part)
         }),
@@ -274,7 +262,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
             messageID: data.assistantMessageID,
             type: "text-delta",
             timeStart: event?.created,
-            raw: event,
           }
           handlers.onPartUpdated(part)
         }),
@@ -287,7 +274,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
             messageID: data.assistantMessageID,
             type: "part-open",
             timeStart: event?.created ?? data.time?.start,
-            raw: event,
           }
           handlers.onPartUpdated(part)
         }),
@@ -384,12 +370,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
       } catch { /* non-critical */ }
     },
 
-    async alert(input: { title: string; message: string }) {
-      try {
-        await ctx.ui.dialog.alert(input)
-      } catch { /* non-critical */ }
-    },
-
     async select(input) {
       try {
         return await ctx.ui.dialog.select({
@@ -438,23 +418,6 @@ export function createV2Adapter(ctx: Context, dispose: Set<() => void>): HostAda
       } catch {
         return {}
       }
-    },
-
-    modelContextLimit(providerID: string, modelID: string) {
-      try {
-        const models = ctx.data.location.model.list() ?? []
-        for (const raw of models as any[]) {
-          const id = String(raw?.id ?? "")
-          const provider = String(raw?.providerID ?? raw?.provider?.id ?? "")
-          const model = String(raw?.modelID ?? raw?.id ?? "")
-          const sameProvider = provider === providerID || id === `${providerID}/${modelID}`
-          const sameModel = model === modelID || id === modelID || id === `${providerID}/${modelID}` || id.endsWith(`/${modelID}`)
-          if (!sameProvider || !sameModel) continue
-          const limit = raw?.limit?.context
-          if (typeof limit === "number" && limit > 0) return limit
-        }
-      } catch { /* ignore */ }
-      return undefined
     },
 
     onPartUpdated(handler: () => void) {

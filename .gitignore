@@ -9,9 +9,8 @@ doc/
 *.doc
 *.docx
 
-# 隐藏文件夹（忽略除 .github 外的所有隐藏文件夹）
+# 隐藏文件夹（.github 等一律忽略）
 .*/
-!.github/
 
 # 本地运行与临时导出文件
 tokenwatch-*.json

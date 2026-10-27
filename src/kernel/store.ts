@@ -8,7 +8,7 @@
  * - 首次启动时自动从现有 JSONL 日志迁移，不丢失历史数据
  */
 
-import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, renameSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import type { LogEntry, ModelPerfStats } from "./format.js"

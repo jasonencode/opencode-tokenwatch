@@ -12,13 +12,7 @@ import type { UsageFilters, UsageReport } from "../kernel/format.js"
 /** 归一化主题色（v2 的嵌套 token 树由 adapter 展平）。 */
 export interface ThemeColors {
   readonly primary: RGBA
-  readonly text: RGBA
   readonly textMuted: RGBA
-  readonly background: RGBA
-  readonly border: RGBA
-  readonly success: RGBA
-  readonly warning: RGBA
-  readonly error: RGBA
 }
 
 /** 归一化消息事件（由 v2 的 step/message 事件折叠而来） */
@@ -39,17 +33,13 @@ export interface NormalizedMessageEvent {
   readonly timeCreated?: number
   /** 请求完成时间（epoch ms），缺失时性能追踪跳过该样本 */
   readonly timeCompleted?: number
-  /** 原始事件对象，供性能追踪器读取时间戳等宿主专属字段 */
-  readonly raw: any
 }
 
 /** 归一化 part 事件（用于 TTFT 计时） */
 export interface NormalizedPartEvent {
   readonly messageID?: string
   readonly type?: string
-  readonly text?: string
   readonly timeStart?: number
-  readonly raw: any
 }
 
 export interface HostEventHandlers {
@@ -111,9 +101,6 @@ export interface UsageDataSource {
 
 /** 宿主能力统一抽象 */
 export interface HostAdapter {
-  /** 宿主版本号，用于诊断与报告元信息 */
-  readonly hostVersion: string
-
   theme(): ThemeColors
   store: KeyValueStore
 
@@ -129,7 +116,6 @@ export interface HostAdapter {
   registerCommands?(specs: readonly CommandSpec[]): () => void
 
   notify(message: string, variant?: NotifyVariant): void
-  alert(input: { title: string; message: string }): Promise<void>
   select<Value>(input: {
     title: string
     options: readonly SelectOption<Value>[]
@@ -151,9 +137,6 @@ export interface HostAdapter {
 
   /** 宿主应用配置（读取 agent prompt 用于 system token 估算） */
   appConfig(): Record<string, unknown>
-
-  /** 模型上下文窗口上限（tokens）；宿主未提供模型信息时返回 undefined */
-  modelContextLimit?(providerID: string, modelID: string): number | undefined
 
   /** 订阅 part 级更新（用于 token 分布重算），返回取消订阅函数 */
   onPartUpdated(handler: () => void): () => void

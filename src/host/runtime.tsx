@@ -43,7 +43,6 @@ function toPerfPartEvent(p: NormalizedPartEvent) {
   return {
     message_id: p.messageID,
     type: p.type,
-    text: p.text,
     time: { start: p.timeStart },
   }
 }

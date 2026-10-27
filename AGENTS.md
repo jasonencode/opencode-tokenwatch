@@ -29,7 +29,6 @@ opencode-tokenwatch/
 │   ├── server.ts               # Server 插件入口（合法空插件；TUI 逻辑不进入服务端）
 │   ├── kernel/                 # ★ 共享内核：零宿主依赖（无 opentui / 无 opencode 类型）
 │   │   ├── model.ts            #   归一化 TokenMessage + 命中率/有效性判定
-│   │   ├── context.ts          #   当前上下文窗口占用（官方 5 分量 / 模型 limit）
 │   │   ├── format.ts           #   数据格式化 & 全部 TypeScript 类型定义
 │   │   ├── i18n.ts             #   国际化（中文/英文/自动检测）
 │   │   ├── perf.ts             #   性能追踪（TTFT/TPS/延迟）+ JSONL 日志
@@ -50,7 +49,6 @@ opencode-tokenwatch/
 │   ├── CODE-REVIEW-2026-09-13.md  # 全项目代码审查报告（含修复跟踪）
 │   └── CODE-REVIEW-V2.md          # 历史审查文档
 ├── assets/                     # 静态资产
-├── scripts/                    # 构建辅助脚本（publish-check.mjs）
 ├── build.tui.mjs               # esbuild 打包脚本（TSX -> JS，含 SolidJS JSX 预编译）
 ├── package.json
 ├── tsconfig.json
@@ -160,7 +158,6 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 | 指标 | 本插件公式 | 官方参照出处 | 结论 |
 |---|---|---|---|
 | tokenTotal | input+output+reasoning+cacheRead+cacheWrite（5分量） | `packages/app/src/components/session/session-context-metrics.ts` tokenTotal；`context/data.js` lastAssistantWithUsage | ✓ 一致 |
-| 上下文占用 | 最后一条有效 assistant 的 5 分量 / 模型 `limit.context` | `session-context-metrics.ts` `getSessionContext` | ✓ 与官方 usage% 一致 |
 | 失败过滤 | 五分量合计 = 0 跳过（含 reasoning） | 同上（tokenTotal <= 0 continue） | ✓ |
 | cacheHitRate | cacheRead / (cacheRead + input) | `core/session/usage.ts`：input = nonCachedInputTokens | ✓ 分母即全部输入 |
 | TPS | output / (time.streamed − 流式窗口起点) | `tui/routes/session/rows.ts` turnTokensPerSecond | ✓（每消息=每 step；窗口起点来自 step.started 事件） |
@@ -195,7 +192,6 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 - **tokenDistribution**：从消息 parts 估算 Token 分布（chars/4 经验公式）
   - 5 桶：system / user / toolCall / toolResult / output + other 兜底桶，超出真实 input 时比例收缩
 - **缓存命中率公式**：`cacheRead / (cacheRead + input)`
-- **上下文窗口**：`contextStats` 取当前会话最后一条有效 assistant 消息，`used = 5 分量 / 模型 limit.context`；单行显示已用/上限、百分比与进度条（与缓存行同构），70%/90% 变色；`showContext` 控制
 - **趋势计算**：最近3次 vs 前3次的命中率差值，需至少6条消息
 - **成本展示**：`showPricing` 开启且 `totalCost > 0` 时显示（免费模型不显示，属正常行为）
 
@@ -258,10 +254,6 @@ interface TokenMessage {          // TUI 内存模型（单条 assistant 消息�
 
 interface SessionTokenData {      // 用量聚合结果
   totalTokens, inputTokens, outputTokens, reasoningTokens, cacheRead, cacheWrite, totalCost
-}
-
-interface ContextUsage {          // 当前上下文窗口占用（kernel/context.ts）
-  providerID, modelID, used, limit, percent
 }
 
 interface ModelPerfStats {        // 性能统计（内存 / stats-store / JSONL）
@@ -395,20 +387,6 @@ npm install
 # 编译（产物在 dist/）
 npm run build
 
-# 发布前检查
-npm run release:check
-
-# 无头回归：对 dist/tui.js 用 mock 宿主驱动 Plugin.setup(ctx)
-node scripts/verify-headless.mjs
-
-# TPS/TTFT 口径回归（模拟 OpenCode 2.x 事件序列）
-node scripts/verify-tps.mjs
-
-# 无头 E2E（需 cd scripts/e2e && npm i）：伪终端驱动真实 TUI，
-# 自动创建临时项目并把 plugins 指向本仓库，注入 /usage 并断言补全列表与四项菜单
-# （锁屏/无显示器也可用）
-node scripts/e2e/opencode2-e2e.js   # OpenCode 2.x
-
 # 在 OpenCode 中加载插件（需先 build）
 # ~/.opencode/config.json 中配置 plugins
 ```
@@ -440,7 +418,6 @@ node scripts/e2e/opencode2-e2e.js   # OpenCode 2.x
 
 - **fork 发布**：npm 包名改为 `@jasonencode/opencode-tokenwatch`；插件 id 保持 `opencode-tokenwatch`
 - **仅支持 OpenCode 2.x**：移除 v1（1.18）适配层、SQL 数据源与 `tui(api)` 入口
-- **新增上下文窗口占用**：侧边栏显示当前会话最后一条有效 assistant 消息的 5 分量 / 模型 `limit.context`，带百分比与进度条；`showContext` 默认开启
 - **入口改为 2.x 契约**：默认导出 `{ id, setup(ctx) }`（与 `Plugin.define` 同形状，类型为
   `Plugin.Definition` / `Plugin.Plugin`）；`@opencode/plugin` 仅 type-only 导入，避免运行时
   依赖把宿主 SDK 及其 `solid-js`/`@opentui/*` peers 带进插件目录

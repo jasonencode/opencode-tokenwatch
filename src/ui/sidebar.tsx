@@ -1,12 +1,10 @@
 import { createSignal, createMemo, createEffect, For, Show, onMount, onCleanup } from "solid-js"
 import { RGBA } from "@opentui/core"
-import type { HostAdapter, KeyValueStore, ThemeColors } from "../host/types.js"
-import { formatTokens, formatTokensShort, formatCost, formatDuration } from "../kernel/format.js"
+import type { HostAdapter, KeyValueStore } from "../host/types.js"
+import { formatTokens, formatCost, formatDuration } from "../kernel/format.js"
 import { t as baseT, setLanguage } from "../kernel/i18n.js"
 import type { PerfTracker } from "../kernel/perf.js"
 import type { TokenMessage } from "../kernel/model.js"
-import { computeContextUsage } from "../kernel/context.js"
-import type { ContextUsage } from "../kernel/context.js"
 import { loadConfig } from "../kernel/config.js"
 import type { SidebarConfig } from "../kernel/config.js"
 
@@ -160,12 +158,6 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   const mutedColor = (): RGBA => theme().textMuted
   const dimColor = (): RGBA => RGBA.fromInts(72, 79, 88, 255)
   const greenColor = (): RGBA => RGBA.fromInts(63, 185, 80, 255)
-  const contextColor = (pct: number | null): RGBA => {
-    if (pct === null) return mutedColor()
-    if (pct >= 90) return RGBA.fromInts(244, 67, 54, 255)
-    if (pct >= 70) return RGBA.fromInts(210, 153, 34, 255)
-    return greenColor()
-  }
   const borderColor = (): RGBA => RGBA.fromInts(55, 65, 80, 255)
 
   // ── 数据聚合 ──
@@ -209,13 +201,6 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
     const denom = sessionTotals().totalInput + sessionTotals().totalCacheRead
     return denom > 0 ? (sessionTotals().totalCacheRead / denom) * 100 : -1
   })
-
-  // 当前上下文窗口：最后一条有效 assistant 消息 / 该模型上限（官方 getSessionContext 口径）
-  const contextStats = createMemo(() =>
-    computeContextUsage(props.allTokenMessages(), (providerID, modelID) =>
-      host.modelContextLimit?.(providerID, modelID),
-    ),
-  )
 
   const modelHitRate = createMemo(() => {
     return modelStats().map(([key, stat]) => {
@@ -375,20 +360,8 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
 
   // ── 宽度派生值 ──
   // innerWidth：边框内可用列数 = panelWidth - 2（左右边框各1格）
-  // barWidth：进度条宽 = innerWidth - paddingX(1*2) - "Cache: "(7) - " XX%"(4) - "↑X.X%"(最多6) = innerWidth - 19
   // 分隔线：innerWidth - paddingX(1*2) = innerWidth - 2
   const innerWidth = () => panelWidth() - 2
-  const barWidth = () => Math.max(8, innerWidth() - 19)
-  const contextRatioText = (ctx: ContextUsage) =>
-    ctx.limit ? `${formatTokensShort(ctx.used)}/${formatTokensShort(ctx.limit)}` : ""
-  // 一行布局：label + 进度条 + 百分比 + 已用/上限，与“缓存:████ 99%”同构
-  const contextBarWidth = (ctx: ContextUsage) => {
-    const content = Math.max(8, innerWidth() - 2)
-    const prefix = getVisualWidth(`${t("context")}:`)
-    const percent = ctx.percent === null ? 0 : getVisualWidth(`${ctx.percent}%`) + 1
-    const ratio = contextRatioText(ctx) ? getVisualWidth(contextRatioText(ctx)) + 1 : 0
-    return Math.max(6, content - prefix - percent - ratio)
-  }
   const divider = () => {
     const w = innerWidth()
     if (w <= 2) return "─".repeat(w)
@@ -485,35 +458,6 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
               </span>
             </text>
           </box>
-        </Show>
-
-        {/* 上下文窗口占用：当前会话最后一条 assistant 消息 / 该模型上限 */}
-        <Show when={config().sidebar.showContext && contextStats()}>
-          {(ctx) => (
-            <box flexDirection="row" paddingX={1} marginTop={1}>
-              <text fg={mutedColor()}>
-                {t("context")}:
-                {ctx().percent === null ? (
-                  <span style={{ fg: primaryColor() } as any}>{formatTokensShort(ctx().used)}</span>
-                ) : (
-                  <>
-                    <span style={{ fg: contextColor(ctx().percent) } as any}>
-                      {progressFilled(ctx().percent ?? 0, contextBarWidth(ctx()))}
-                      {progressRemaining(ctx().percent ?? 0, contextBarWidth(ctx()))}
-                      {" "}
-                      {ctx().percent ?? 0}%
-                    </span>
-                    {ctx().limit ? (
-                      <span style={{ fg: dimColor() } as any}>
-                        {" "}
-                        {contextRatioText(ctx())}
-                      </span>
-                    ) : null}
-                  </>
-                )}
-              </text>
-            </box>
-          )}
         </Show>
 
         {/* ══════════════════════════════════════

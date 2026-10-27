@@ -109,11 +109,6 @@ export function formatTokens(n: number): string {
   return String(n)
 }
 
-/** 紧凑 token 数：去掉无意义的 `.0`，用于窄侧边栏的一行展示 */
-export function formatTokensShort(n: number): string {
-  return formatTokens(n).replace(/\.0([KMB])$/, "$1")
-}
-
 export function formatCost(n: number): string {
   if (n === 0) return "$0.00"
   if (n < 0.01) return `$${n.toFixed(4)}`
@@ -129,7 +124,7 @@ export function formatDuration(ms: number | null): string {
   return `${m}m ${s}s`
 }
 
-export function formatFilters(filters: UsageFilters): string {
+function formatFilters(filters: UsageFilters): string {
   const parts: string[] = []
   if (filters.sessionId) parts.push(`session=${filters.sessionId}`)
   if (filters.provider) parts.push(`provider=${filters.provider}`)
@@ -201,7 +196,7 @@ function table(columns: Column[], rows: string[][], totalRow?: string[]): string
   return lines.join("\n")
 }
 
-export function formatSessionSummary(data: SessionTokenData, title = "Current Session"): string {
+function formatSessionSummary(data: SessionTokenData, title = "Current Session"): string {
   const modelLabel = data.modelsUsed.length > 1
     ? `${data.modelsUsed.length} models`
     : data.model || "(unknown)"
@@ -221,11 +216,7 @@ export function formatSessionSummary(data: SessionTokenData, title = "Current Se
   ].join("\n")
 }
 
-export function formatStatusBar(data: SessionTokenData): string {
-  return `Tok:${formatTokens(data.totalTokens)} Req:${data.requestCount} Cost:${formatCost(data.totalCost)}`
-}
-
-export function formatModelBreakdown(items: ModelBreakdownItem[]): string {
+function formatModelBreakdown(items: ModelBreakdownItem[]): string {
   if (items.length === 0) return "═══ Model Breakdown ═══\n(no data)"
 
   const total = items.reduce((acc, item) => ({
@@ -274,7 +265,7 @@ export function formatModelBreakdown(items: ModelBreakdownItem[]): string {
   ].join("\n")
 }
 
-export function formatProviderBreakdown(items: ProviderBreakdownItem[]): string {
+function formatProviderBreakdown(items: ProviderBreakdownItem[]): string {
   if (items.length === 0) return "═══ Provider Breakdown ═══\n(no data)"
 
   const total = items.reduce((acc, item) => ({
@@ -320,7 +311,7 @@ export function formatProviderBreakdown(items: ProviderBreakdownItem[]): string 
   ].join("\n")
 }
 
-export function formatDailyBreakdown(items: DailyBreakdownItem[]): string {
+function formatDailyBreakdown(items: DailyBreakdownItem[]): string {
   if (items.length === 0) return "═══ Daily Breakdown ═══\n(no data)"
 
   const total = items.reduce((acc, item) => ({
@@ -366,7 +357,7 @@ export function formatDailyBreakdown(items: DailyBreakdownItem[]): string {
   ].join("\n")
 }
 
-export function formatSessionBreakdown(items: SessionBreakdownItem[]): string {
+function formatSessionBreakdown(items: SessionBreakdownItem[]): string {
   if (items.length === 0) return "═══ Session Breakdown ═══\n(no data)"
 
   const rows = items.map((item) => {

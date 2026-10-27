@@ -45,7 +45,7 @@ function stamp(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-export interface CommandActions {
+interface CommandActions {
   htmlReport(filters?: UsageFilters, presetTag?: string): Promise<void>
   jsonExport(): Promise<void>
   textReport(): Promise<void>
@@ -101,7 +101,7 @@ export function createCommandActions(host: HostAdapter): CommandActions {
 }
 
 /** 报告时间范围预设，供 /usage 菜单使用 */
-export interface RangePreset {
+interface RangePreset {
   readonly id: string
   readonly label: string
   readonly tag: string
